@@ -1,0 +1,180 @@
+{% from "macros.html" import dashboard_nav, unified_styles, page_header %}
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ title }} - 管理员仪表板</title>
+    {{ unified_styles() }}
+    <style>
+        .action-link {
+            color: #3498db;
+            text-decoration: none;
+            margin-right: 10px;
+            font-weight: 500;
+        }
+        .action-link:hover {
+            text-decoration: underline;
+        }
+        .action-btn {
+            padding: 5px 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+            font-size: 0.9em;
+            margin: 2px;
+        }
+        .btn-enable {
+            background: #27ae60;
+            color: white;
+        }
+        .btn-disable {
+            background: #e74c3c;
+            color: white;
+        }
+        .btn-enable:hover {
+            background: #229954;
+        }
+        .btn-disable:hover {
+            background: #c0392b;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        {{ dashboard_nav('admin') }}
+        
+        {{ page_header('👥 用户管理', '') }}
+        
+        <div class="content-section">
+            <div class="stats-grid">
+                <div class="stat-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                    <h3>{{ admin_count }}</h3>
+                    <p>管理员总数</p>
+                </div>
+                <div class="stat-card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
+                    <h3>{{ teacher_count }}</h3>
+                    <p>教师总数</p>
+                </div>
+                <div class="stat-card" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
+                    <h3>{{ student_count }}</h3>
+                    <p>学生总数</p>
+                </div>
+            </div>
+        </div>
+        
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <!-- 筛选区域 -->
+        <div class="content-section">
+            <h3 class="section-title">🔍 筛选条件</h3>
+            <form method="GET" action="{{ url_for('admin_user_management') }}">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>角色</label>
+                        <select name="role">
+                            <option value="">全部角色</option>
+                            <option value="admin" {% if role_filter == 'admin' %}selected{% endif %}>管理员</option>
+                            <option value="teacher" {% if role_filter == 'teacher' %}selected{% endif %}>教师</option>
+                            <option value="student" {% if role_filter == 'student' %}selected{% endif %}>学生</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>状态</label>
+                        <select name="status">
+                            <option value="">全部状态</option>
+                            <option value="1" {% if status_filter == '1' %}selected{% endif %}>激活</option>
+                            <option value="0" {% if status_filter == '0' %}selected{% endif %}>禁用</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>姓名</label>
+                        <input type="text" name="search_name" value="{{ search_name }}" placeholder="输入姓名搜索">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>用户名</label>
+                        <input type="text" name="search_username" value="{{ search_username }}" placeholder="输入用户名搜索">
+                    </div>
+                    
+                    <div class="form-group" style="display: flex; align-items: flex-end; gap: 10px;">
+                        <button type="submit" class="btn btn-primary">🔍 筛选</button>
+                        <a href="{{ url_for('admin_user_management') }}" class="btn btn-secondary">🔄 重置</a>
+                    </div>
+                </div>
+            </form>
+        </div>
+
+        <!-- 用户列表 -->
+        <div class="content-section">
+            <h2 style="margin-top: 0; color: #2c3e50;">系统用户列表 (共 {{ users|length }} 人)</h2>
+            <div style="overflow-x: auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>用户名</th>
+                        <th>真实姓名</th>
+                        <th>角色</th>
+                        <th>手机号</th>
+                        <th>邮箱</th>
+                        <th>状态</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for user in users %}
+                    <tr>
+                        <td>{{ user.user_id }}</td>
+                        <td>{{ user.username }}</td>
+                        <td>{{ user.real_name }}</td>
+                        <td>
+                            {% if user.role == 'admin' %}
+                                👨‍💼 管理员
+                            {% elif user.role == 'teacher' %}
+                                👨‍🏫 教师
+                            {% elif user.role == 'student' %}
+                                🎓 学生
+                            {% endif %}
+                        </td>
+                        <td>{{ user.phone or '-' }}</td>
+                        <td>{{ user.email or '-' }}</td>
+                        <td>
+                            {% if user.status == 1 %}
+                                <span class="status-active">✓ 激活</span>
+                            {% else %}
+                                <span class="status-inactive">✗ 禁用</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <a href="{{ url_for('admin_edit_user', user_id=user.user_id) }}" class="action-link">✏️ 编辑</a>
+                            <form method="POST" action="{{ url_for('admin_toggle_status', user_id=user.user_id) }}" style="display:inline;">
+                                <button type="submit" class="action-btn {% if user.status == 1 %}btn-disable{% else %}btn-enable{% endif %}"
+                                    {% if user.user_id == current_user.user_id %} disabled title="不能禁用自己" {% endif %}>
+                                    {% if user.status == 1 %}🚫 禁用{% else %}✓ 激活{% endif %}
+                                </button>
+                            </form>
+                            {% if user.user_id != current_user.user_id %}
+                            <form method="POST" action="{{ url_for('admin_delete_user', user_id=user.user_id) }}" style="display:inline;" 
+                                  onsubmit="return confirm('确定要删除用户「{{ user.real_name }}」吗？此操作不可恢复！');">
+                                <button type="submit" class="action-btn" style="background: #e74c3c; color: white;">🗑️ 删除</button>
+                            </form>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

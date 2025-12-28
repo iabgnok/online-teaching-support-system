@@ -1,0 +1,232 @@
+{% from "macros.html" import dashboard_nav, unified_styles, page_header %}
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ title }} - 在线教学支持系统</title>
+    {{ unified_styles() }}
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            document.querySelectorAll('.tab').forEach(function(tab) {
+                tab.addEventListener('click', function() {
+                    var url = this.getAttribute('data-url');
+                    if (url) location.href = url;
+                });
+            });
+        });
+    </script>
+</head>
+<body>
+    <div class="container">
+        {{ dashboard_nav('student') }}
+        
+        {{ page_header('🔍 信息查询', '查询我的课程、作业和成绩信息') }}
+        
+        <div class="tabs">
+            <div class="tab {% if query_type == 'course' %}active{% endif %}" data-url="{{ url_for('student_query', type='course') }}">
+                课程查询
+            </div>
+            <div class="tab {% if query_type == 'assignment' %}active{% endif %}" data-url="{{ url_for('student_query', type='assignment') }}">
+                作业查询
+            </div>
+            <div class="tab {% if query_type == 'grade' %}active{% endif %}" data-url="{{ url_for('student_query', type='grade') }}">
+                成绩查询
+            </div>
+        </div>
+        
+        <div class="content-section">
+            <form method="POST" action="{{ url_for('student_query') }}">
+                <input type="hidden" name="query_type" value="{{ query_type }}">
+                
+                {% if query_type == 'course' %}
+                <h3>我的课程查询</h3>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>课程名称</label>
+                        <input type="text" name="course_name" placeholder="支持模糊查询">
+                    </div>
+                    <div class="form-group">
+                        <label>学期</label>
+                        <input type="text" name="semester" placeholder="如：2024-2025-1">
+                    </div>
+                </div>
+                
+                {% elif query_type == 'assignment' %}
+                <h3>我的作业查询</h3>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>课程名称</label>
+                        <input type="text" name="course_name" placeholder="支持模糊查询">
+                    </div>
+                    <div class="form-group">
+                        <label>类型</label>
+                        <select name="assignment_type">
+                            <option value="">全部</option>
+                            <option value="homework">作业</option>
+                            <option value="exam">考试</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>提交状态</label>
+                        <select name="status">
+                            <option value="">全部</option>
+                            <option value="not_submitted">未提交</option>
+                            <option value="submitted">已提交</option>
+                            <option value="graded">已批改</option>
+                        </select>
+                    </div>
+                </div>
+                
+                {% elif query_type == 'grade' %}
+                <h3>我的成绩查询</h3>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>课程名称</label>
+                        <input type="text" name="course_name" placeholder="支持模糊查询">
+                    </div>
+                    <div class="form-group">
+                        <label>最低成绩</label>
+                        <input type="number" name="min_grade" step="0.1" placeholder="如：60">
+                    </div>
+                    <div class="form-group">
+                        <label>最高成绩</label>
+                        <input type="number" name="max_grade" step="0.1" placeholder="如：100">
+                    </div>
+                </div>
+                {% endif %}
+                
+                <div style="margin-top: 20px;">
+                    <button type="submit" class="btn btn-primary">🔍 查询</button>
+                    <button type="reset" class="btn btn-secondary">🔄 重置</button>
+                </div>
+            </form>
+        </div>
+        
+        {% if results %}
+        <div class="result-count" style="display: flex; justify-content: space-between; align-items: center;">
+            <span>📊 查询结果：共 {{ results|length }} 条记录</span>
+            <a href="{{ url_for('student_query_export', type=query_type, **request.args) }}" class="btn btn-primary" style="text-decoration: none;">📥 导出CSV</a>
+        </div>
+        
+        {% if query_type == 'course' %}
+        <table>
+            <thead>
+                <tr>
+                    <th>课程名称</th>
+                    <th>班级</th>
+                    <th>学期</th>
+                    <th>学分</th>
+                    <th>上课时间</th>
+                    <th>教室</th>
+                    <th>选课时间</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for sc, tc, course in results %}
+                <tr>
+                    <td>{{ course.course_name }}</td>
+                    <td>{{ tc.class_name }}</td>
+                    <td>{{ tc.semester }}</td>
+                    <td>{{ course.credit }}</td>
+                    <td>{{ tc.class_time or '-' }}</td>
+                    <td>{{ tc.classroom or '-' }}</td>
+                    <td>{{ sc.enroll_time.strftime('%Y-%m-%d') if sc.enroll_time else '-' }}</td>
+                    <td>
+                        <a href="{{ url_for('student_class_detail', class_id=tc.class_id) }}" class="btn btn-primary" style="padding: 5px 10px; font-size: 0.85em;">查看详情</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        
+        {% elif query_type == 'assignment' %}
+        <table>
+            <thead>
+                <tr>
+                    <th>课程</th>
+                    <th>作业标题</th>
+                    <th>类型</th>
+                    <th>总分</th>
+                    <th>截止时间</th>
+                    <th>提交状态</th>
+                    <th>得分</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in results %}
+                <tr>
+                    <td>{{ item.course.course_name }}</td>
+                    <td>{{ item.assignment.title }}</td>
+                    <td>{{ '📝 作业' if item.assignment.type == 'homework' else '📄 考试' }}</td>
+                    <td>{{ item.assignment.total_score }}</td>
+                    <td>{{ item.assignment.deadline.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td class="{% if item.submission and item.submission.status == 'graded' %}status-graded{% elif item.submission %}status-submitted{% else %}status-not-submitted{% endif %}">
+                        {% if item.submission and item.submission.status == 'graded' %}
+                            已批改
+                        {% elif item.submission %}
+                            已提交
+                        {% else %}
+                            未提交
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if item.submission and item.submission.status == 'graded' %}
+                            <strong>{{ item.submission.score }}</strong>
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if not item.submission %}
+                            <a href="{{ url_for('student_submit_assignment', assignment_id=item.assignment.assignment_id) }}" class="btn btn-primary" style="padding: 5px 10px; font-size: 0.85em;">去提交</a>
+                        {% else %}
+                            <a href="{{ url_for('student_submit_assignment', assignment_id=item.assignment.assignment_id) }}" class="btn btn-secondary" style="padding: 5px 10px; font-size: 0.85em;">查看</a>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        
+        {% elif query_type == 'grade' %}
+        <table>
+            <thead>
+                <tr>
+                    <th>课程名称</th>
+                    <th>班级</th>
+                    <th>作业平均</th>
+                    <th>考试平均</th>
+                    <th>教师评价</th>
+                    <th>最终成绩</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for grade, tc, course in results %}
+                <tr>
+                    <td>{{ course.course_name }}</td>
+                    <td>{{ tc.class_name }}</td>
+                    <td>{{ '%.1f'|format(grade.homework_avg|float) if grade.homework_avg is not none else '-' }}</td>
+                    <td>{{ '%.1f'|format(grade.exam_avg|float) if grade.exam_avg is not none else '-' }}</td>
+                    <td>{{ '%.1f'|format(grade.teacher_evaluation|float) if grade.teacher_evaluation is not none else '-' }}</td>
+                    <td><strong>{{ '%.1f'|format(grade.final_grade|float) if grade.final_grade is not none else '-' }}</strong></td>
+                    <td>
+                        <a href="{{ url_for('student_view_grades', class_id=tc.class_id) }}" class="btn btn-success" style="padding: 5px 10px; font-size: 0.85em;">查看详情</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+        
+        {% elif request.method == 'POST' %}
+        <div class="no-results">
+            <p>😔 未找到符合条件的记录</p>
+            <p style="font-size: 0.9em;">请尝试调整查询条件</p>
+        </div>
+        {% endif %}
+    </div>
+</body>
+</html>

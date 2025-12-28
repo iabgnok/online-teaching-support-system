@@ -1,0 +1,178 @@
+{% from "macros.html" import dashboard_nav %}
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ title }} - 管理员仪表板</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 800px; margin: auto; padding: 20px; border: 1px solid #ccc; border-radius: 8px; }
+        h1 { border-bottom: 2px solid #eee; padding-bottom: 10px; }
+        h3 { margin-top: 30px; border-bottom: 1px solid #eee; padding-bottom: 10px; color: #333; }
+        label { display: block; margin-top: 10px; font-weight: bold; }
+        input[type="text"], input[type="password"], input[type="email"], input[type="tel"], select {
+            width: 100%;
+            padding: 8px;
+            margin-top: 5px;
+            margin-bottom: 15px;
+            box-sizing: border-box;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        input[readonly], input[disabled] {
+            background-color: #f5f5f5;
+            cursor: not-allowed;
+        }
+        .form-row { display: flex; gap: 20px; }
+        .form-row > div { flex: 1; }
+        .btn-group { margin-top: 20px; display: flex; gap: 10px; justify-content: flex-end; }
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .btn-primary { background-color: #4CAF50; color: white; }
+        .btn-secondary { background-color: #6c757d; color: white; }
+        .btn:hover { opacity: 0.9; }
+        .alert { padding: 10px; margin: 10px 0; border-radius: 4px; }
+        .alert-success { background-color: #d4edda; color: #155724; }
+        .alert-danger { background-color: #f8d7da; color: #721c24; }
+        .alert-warning { background-color: #fff3cd; color: #856404; }
+        small { color: #666; font-size: 0.9em; }
+        .required { color: red; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>{{ title }}</h1>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <form method="POST" action="{{ url_for('admin_edit_user', user_id=edit_user.user_id) }}">
+            <h3>基本信息</h3>
+            <h3>基本信息</h3>
+            
+            <div class="form-row">
+                <div>
+                    <label for="username">用户名 <span class="required">*</span></label>
+                    <input type="text" id="username" name="username" value="{{ edit_user.username }}" required>
+                </div>
+                
+                <div>
+                    <label for="real_name">真实姓名 <span class="required">*</span></label>
+                    <input type="text" id="real_name" name="real_name" value="{{ edit_user.real_name }}" required>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div>
+                    <label for="phone">手机号码</label>
+                    <input type="tel" id="phone" name="phone" value="{{ edit_user.phone or '' }}">
+                </div>
+                
+                <div>
+                    <label for="email">电子邮箱</label>
+                    <input type="email" id="email" name="email" value="{{ edit_user.email or '' }}">
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div>
+                    <label for="password">新密码</label>
+                    <input type="password" id="password" name="password" placeholder="不修改密码请留空">
+                    <small>如需修改密码，请输入新密码；否则留空</small>
+                </div>
+                
+                <div>
+                    <label for="role">用户角色</label>
+                    <input type="text" id="role" name="role" value="{{ edit_user.role }}" readonly disabled>
+                    <small>用户角色不可修改</small>
+                </div>
+            </div>
+
+            {% if role_profile %}
+            <h3>
+                {% if edit_user.role == 'admin' %}
+                    管理员信息
+                {% elif edit_user.role == 'teacher' %}
+                    教师信息
+                {% elif edit_user.role == 'student' %}
+                    学生信息
+                {% endif %}
+            </h3>
+
+            {% if edit_user.role == 'admin' %}
+            <div class="form-row">
+                <div>
+                    <label for="role_no">管理员编号 <span class="required">*</span></label>
+                    <input type="text" id="role_no" name="role_no" value="{{ role_profile.admin_no }}" required>
+                </div>
+                
+                <div>
+                    <label for="department">部门</label>
+                    <input type="text" id="department" name="department" value="{{ role_profile.department.dept_name if role_profile.department else '' }}">
+                </div>
+            </div>
+            {% endif %}
+
+            {% if edit_user.role == 'teacher' %}
+            <div class="form-row">
+                <div>
+                    <label for="role_no">教师工号 <span class="required">*</span></label>
+                    <input type="text" id="role_no" name="role_no" value="{{ role_profile.teacher_no }}" required>
+                </div>
+                
+                <div>
+                    <label for="title">职称</label>
+                    <input type="text" id="title" name="title" value="{{ role_profile.title or '' }}" placeholder="如：讲师、副教授、教授">
+                </div>
+            </div>
+
+            <div class="form-row">
+                    <label for="department">所属院系</label>
+                    <input type="text" id="department" name="department" value="{{ role_profile.department.dept_name if role_profile.department else '' }}">
+                </div>
+            </div>
+            {% endif %}
+
+            {% if edit_user.role == 'student' %}
+            <div class="form-row">
+                <div>
+                    <label for="role_no">学号 <span class="required">*</span></label>
+                    <input type="text" id="role_no" name="role_no" value="{{ role_profile.student_no }}" required>
+                </div>
+
+                <div>
+                    <label for="major">专业</label>
+                    <input type="text" id="major" name="major" value="{{ role_profile.major or '' }}">
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div>
+                    <label for="department">学院</label>
+                    <input type="text" id="department" name="department" value="{{ role_profile.department.dept_name if role_profile.department else '' }}">
+                </div>
+            </div>
+            {% endif %}
+            {% endif %}
+
+            <div class="btn-group">
+                <a href="{{ url_for('admin_user_management') }}" class="btn btn-secondary">取消</a>
+                <button type="submit" class="btn btn-primary">保存修改</button>
+            </div>
+        </form>
+
+        {{ dashboard_nav('admin') }}
+    </div>
+</body>
+</html>

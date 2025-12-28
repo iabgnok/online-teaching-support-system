@@ -1,0 +1,107 @@
+{% from "macros.html" import dashboard_nav, unified_styles %}
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ title }} - 在线教学支持系统</title>
+    {{ unified_styles() }}
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 800px; margin: auto; }
+        h1 { border-bottom: 2px solid #eee; padding-bottom: 10px; }
+        .info-section { background: #f8f9fa; padding: 15px; margin: 20px 0; border-radius: 5px; }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; font-weight: bold; margin-bottom: 5px; }
+        input[type="number"], textarea {
+            width: 100%;
+            padding: 8px;
+            box-sizing: border-box;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        textarea { height: 120px; }
+        .btn { padding: 10px 20px; margin: 5px; text-decoration: none; border-radius: 4px; border: none; cursor: pointer; }
+        .btn-primary { background-color: #28a745; color: white; }
+        .btn-secondary { background-color: #6c757d; color: white; }
+        .alert { padding: 10px; margin: 10px 0; border-radius: 4px; }
+        .alert-success { background-color: #d4edda; color: #155724; }
+        .alert-danger { background-color: #f8d7da; color: #721c24; }
+        .required { color: red; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="nav-bar">
+            <div class="nav-links">
+                <a href="{{ url_for('teacher_assignment_detail', assignment_id=assignment.assignment_id) }}">← 返回作业详情</a>
+            </div>
+            <div class="nav-links">
+                <a href="{{ url_for('change_password') }}">🔐 修改密码</a>
+                <a href="{{ url_for('logout') }}" style="color: #dc3545;">🚺 退出登录</a>
+            </div>
+        </div>
+        
+        <div class="page-header">
+            <h1>批改作业</h1>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="info-section">
+            <h3>学生信息</h3>
+            <p><strong>学号：</strong>{{ student.student_no }}</p>
+            <p><strong>姓名：</strong>{{ student.name }}</p>
+            <p><strong>专业：</strong>{{ student.major or '-' }}</p>
+        </div>
+
+        <div class="info-section">
+            <h3>作业信息</h3>
+            <p><strong>标题：</strong>{{ assignment.title }}</p>
+            <p><strong>类型：</strong>{{ '作业' if assignment.type == 'homework' else '考试' }}</p>
+            <p><strong>总分：</strong>{{ assignment.total_score }}</p>
+            <p><strong>提交时间：</strong>{{ submission.submit_time.strftime('%Y-%m-%d %H:%M') }}</p>
+        </div>
+
+        <div class="info-section">
+            <h3>提交内容</h3>
+            {% if submission.content %}
+            <p style="white-space: pre-wrap;">{{ submission.content }}</p>
+            {% else %}
+            <p style="color: #999;">无文本内容</p>
+            {% endif %}
+            
+            {% if submission.file_name %}
+            <p><strong>附件：</strong>{{ submission.file_name }}</p>
+            {% endif %}
+        </div>
+
+        <form method="POST">
+            <h3>批改</h3>
+            
+            <div class="form-group">
+                <label for="score">得分 <span class="required">*</span> (0 - {{ assignment.total_score }})</label>
+                <input type="number" id="score" name="score" min="0" max="{{ assignment.total_score }}" step="0.01" 
+                       value="{{ submission.score if submission.score is not none else '' }}" required>
+            </div>
+
+            <div class="form-group">
+                <label for="feedback">批改意见</label>
+                <textarea id="feedback" name="feedback" placeholder="请输入批改意见和建议">{{ submission.feedback or '' }}</textarea>
+            </div>
+
+            <div class="form-group">
+                <button type="submit" class="btn btn-primary">保存批改</button>
+                <a href="{{ url_for('teacher_assignment_detail', assignment_id=assignment.assignment_id) }}" class="btn btn-secondary">取消</a>
+            </div>
+        </form>
+    </div>
+</body>
+</html>

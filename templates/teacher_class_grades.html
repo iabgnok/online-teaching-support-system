@@ -1,0 +1,124 @@
+{% from "macros.html" import dashboard_nav, unified_styles %}
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ title }} - 在线教学支持系统</title>
+    {{ unified_styles() }}
+    <style>
+        /* 页面特定样式 */
+        .grade-excellent { color: #28a745; font-weight: bold; }
+        .grade-fail { color: #dc3545; font-weight: bold; }
+        input[type="number"] { 
+            width: 100px; 
+            padding: 6px; 
+            border: 1px solid #ddd; 
+            border-radius: 4px;
+            text-align: center;
+        }
+        input[type="number"]:focus {
+            border-color: #3498db;
+            outline: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="nav-bar">
+            <div class="nav-links">
+                <a href="{{ url_for('teacher_class_detail', class_id=class_id) }}">← 返回班级详情</a>
+            </div>
+            <div class="nav-links">
+                <a href="{{ url_for('change_password') }}">🔐 修改密码</a>
+                <a href="{{ url_for('logout') }}" style="color: #dc3545;">� 退出登录</a>
+            </div>
+        </div>
+        
+        <div class="page-header">
+            <h1>{{ course.course_name }} - {{ teaching_class.class_name }}</h1>
+            <p class="subtitle">学期：{{ teaching_class.semester }}</p>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="content-section" style="background: #fff3cd; border-left: 4px solid #ffc107;">
+            <h3 style="color: #856404; margin: 0 0 15px 0;">📊 成绩计算规则</h3>
+            <p><strong>最终成绩 = 作业平均分 × 40% + 考试平均分 × 40% + 教师课末评价 × 20%</strong></p>
+            <ul>
+                <li>作业平均分：自动计算该学生所有作业的平均分（包括已批改的实际分数和未提交/未批改的0分）</li>
+                <li>考试平均分：自动计算该学生所有考试的平均分（包括已批改的实际分数和未提交/未批改的0分）</li>
+                <li>教师课末评价：需要教师手动录入（0-100分）</li>
+            </ul>
+            <p style="color: #dc3545;"><strong>注意：</strong>点击"计算并发布成绩"后，系统将根据上述规则自动计算所有学生的最终成绩。</p>
+        </div>
+
+        <div class="content-section">
+        <form method="POST" action="{{ url_for('teacher_calculate_grades', class_id=class_id) }}">
+            <h2 class="section-title">📝 班级成绩表 ({{ grades_list|length }} 人)</h2>
+            
+            {% if grades_list %}
+            <table>
+                <thead>
+                    <tr>
+                        <th rowspan="2">学号</th>
+                        <th rowspan="2">姓名</th>
+                        <th colspan="3">成绩组成</th>
+                        <th rowspan="2">教师课末评价<br>(请输入0-100)</th>
+                        <th rowspan="2">最终成绩</th>
+                        <th rowspan="2">计算时间</th>
+                    </tr>
+                    <tr>
+                        <th>作业平均<br>(40%)</th>
+                        <th>考试平均<br>(40%)</th>
+                        <th>评价分<br>(20%)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in grades_list %}
+                    <tr>
+                        <td>{{ item.student.student_no }}</td>
+                        <td>{{ item.student.name }}</td>
+                        <td>{{ '%.2f'|format(item.current_homework_avg) }}</td>
+                        <td>{{ '%.2f'|format(item.current_exam_avg) }}</td>
+                        <td>{{ '%.2f'|format(item.grade.teacher_evaluation) if item.grade and item.grade.teacher_evaluation is not none else '-' }}</td>
+                        <td>
+                            <input type="number" name="teacher_eval_{{ item.student.student_id }}" 
+                                   min="0" max="100" step="0.01"
+                                   value="{{ item.grade.teacher_evaluation if item.grade and item.grade.teacher_evaluation is not none else '' }}"
+                                   placeholder="0-100">
+                        </td>
+                        <td>
+                            {% if item.grade and item.grade.final_grade is not none %}
+                                <span class="{% if item.grade.final_grade >= 85 %}grade-excellent{% elif item.grade.final_grade < 60 %}grade-fail{% endif %}">
+                                    {{ '%.2f'|format(item.grade.final_grade) }}
+                                </span>
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td>{{ item.grade.calculated_at.strftime('%Y-%m-%d') if item.grade and item.grade.calculated_at else '-' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            
+            <div style="margin-top: 25px; text-align: center;">
+                <button type="submit" class="btn btn-success">💾 计算并发布成绩</button>
+            </div>
+            
+            {% else %}
+            <div class="empty-state">暂无学生数据</div>
+            {% endif %}
+        </form>
+        </div>
+    </div>
+</body>
+</html>

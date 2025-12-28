@@ -1,0 +1,211 @@
+{% from "macros.html" import dashboard_nav, unified_styles, page_header %}
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ title }} - 在线教学支持系统</title>
+    {{ unified_styles() }}
+    <style>
+        .grade-excellent { color: #28a745; font-weight: bold; }
+        .grade-good { color: #007bff; }
+        .grade-fail { color: #dc3545; font-weight: bold; }
+        .deadline-passed { color: #dc3545; font-weight: bold; }
+        .deadline-soon { color: #ffc107; }
+        .material-item { padding: 15px; border-bottom: 1px solid #eee; display: flex; align-items: center; gap: 10px; }
+        .material-item:last-child { border-bottom: none; }
+        .material-icon { font-size: 1.5em; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        {{ dashboard_nav('student') }}
+        
+        {{ page_header(course.course_name + ' - ' + teaching_class.class_name, '') }}
+        
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
+        <div class="info-card">
+            <h3>📖 课程信息</h3>
+            <p><strong>课程代码：</strong>{{ course.course_code }}</p>
+            <p><strong>学分：</strong>{{ course.credit if course.credit else '-' }}</p>
+            <p><strong>学期：</strong>{{ teaching_class.semester }}</p>
+            <p><strong>教室：</strong>{{ teaching_class.classroom or '-' }}</p>
+            <p><strong>上课时间：</strong>{{ teaching_class.class_time or '-' }}</p>
+            {% if grade and grade.teacher_evaluation is not none %}
+            <p><strong>最终成绩：</strong>
+                {% if grade.final_grade is not none %}
+                <span class="grade-{% if grade.final_grade >= 90 %}excellent{% elif grade.final_grade >= 60 %}good{% else %}fail{% endif %}" style="font-size: 1.2em; font-weight: bold;">
+                    {{ '%.1f'|format(grade.final_grade) }}
+                </span>
+                {% else %}
+                <span style="color: #999;">计算中...</span>
+                {% endif %}
+                <a href="{{ url_for('student_view_grades', class_id=teaching_class.class_id) }}" class="btn btn-success" style="margin-left: 20px;">查看成绩详情</a>
+            </p>
+            {% endif %}
+        </div>
+
+        <!-- 作业列表 -->
+        <div class="content-section">
+            <h2 class="section-title">📝 作业</h2>
+                {% set homeworks = assignments_info|selectattr('assignment.type', 'equalto', 'homework')|list %}
+                {% if homeworks %}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>标题</th>
+                            <th>总分</th>
+                            <th>截止时间</th>
+                            <th>状态</th>
+                            <th>得分</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in homeworks %}
+                        {% set is_overdue = item.assignment.deadline < item.assignment.deadline.__class__.now() and not item.submission %}
+                        <tr {% if is_overdue %}style="background-color: #ffe6e6;"{% endif %}>
+                            <td>{{ item.assignment.title }}</td>
+                            <td>{{ item.assignment.total_score }}</td>
+                            <td>
+                                {{ item.assignment.deadline.strftime('%Y-%m-%d %H:%M') }}
+                                {% if item.assignment.deadline < item.assignment.deadline.__class__.now() %}
+                                    <span class="deadline-passed">（已截止）</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if is_overdue %}
+                                    <span style="color: #dc3545; font-weight: bold;">⚠️ 逾期未交</span>
+                                {% else %}
+                                    <span class="status-{{ 'graded' if item.submission and item.submission.status == 'graded' else ('submitted' if item.submission else 'notsubmit') }}">
+                                        {{ item.status }}
+                                    </span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if item.submission and item.submission.status == 'graded' %}
+                                    <strong>{{ item.submission.score }}</strong>
+                                {% else %}
+                                    -
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if is_overdue %}
+                                    <span style="color: #999;">已截止</span>
+                                {% elif not item.submission %}
+                                    <a href="{{ url_for('student_submit_assignment', assignment_id=item.assignment.assignment_id) }}" class="btn btn-warning">提交</a>
+                                {% elif item.submission.status == 'submitted' %}
+                                    <a href="{{ url_for('student_submit_assignment', assignment_id=item.assignment.assignment_id) }}" class="btn btn-secondary">重新提交</a>
+                                {% else %}
+                                    <span style="color: #999;">已批改</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="empty-state">暂无作业</div>
+                {% endif %}
+        </div>
+
+        <!-- 考试列表 -->
+        <div class="content-section">
+            <h2 class="section-title">📋 考试</h2>
+                {% set exams = assignments_info|selectattr('assignment.type', 'equalto', 'exam')|list %}
+                {% if exams %}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>标题</th>
+                            <th>总分</th>
+                            <th>时长(分钟)</th>
+                            <th>截止时间</th>
+                            <th>状态</th>
+                            <th>得分</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in exams %}
+                        {% set is_overdue = item.assignment.deadline < item.assignment.deadline.__class__.now() and not item.submission %}
+                        <tr {% if is_overdue %}style="background-color: #ffe6e6;"{% endif %}>
+                            <td>{{ item.assignment.title }}</td>
+                            <td>{{ item.assignment.total_score }}</td>
+                            <td>{{ item.assignment.duration or '-' }}</td>
+                            <td>
+                                {{ item.assignment.deadline.strftime('%Y-%m-%d %H:%M') }}
+                                {% if item.assignment.deadline < item.assignment.deadline.__class__.now() %}
+                                    <span class="deadline-passed">（已截止）</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if is_overdue %}
+                                    <span style="color: #dc3545; font-weight: bold;">⚠️ 逾期未交</span>
+                                {% else %}
+                                    <span class="status-{{ 'graded' if item.submission and item.submission.status == 'graded' else ('submitted' if item.submission else 'notsubmit') }}">
+                                        {{ item.status }}
+                                    </span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if item.submission and item.submission.status == 'graded' %}
+                                    <strong>{{ item.submission.score }}</strong>
+                                {% else %}
+                                    -
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if is_overdue %}
+                                    <span style="color: #999;">已截止</span>
+                                {% elif not item.submission %}
+                                    <a href="{{ url_for('student_submit_assignment', assignment_id=item.assignment.assignment_id) }}" class="btn btn-warning">提交</a>
+                                {% elif item.submission.status == 'submitted' %}
+                                    <a href="{{ url_for('student_submit_assignment', assignment_id=item.assignment.assignment_id) }}" class="btn btn-secondary">重新提交</a>
+                                {% else %}
+                                    <span style="color: #999;">已批改</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="empty-state">暂无考试</div>
+                {% endif %}
+        </div>
+
+        <!-- 教学资料列表 -->
+        <div class="content-section">
+            <h2 class="section-title">📚 教学资料</h2>
+                {% if materials %}
+                    {% for material in materials %}
+                    <div class="material-item">
+                        <span class="material-icon">📄</span>
+                        <strong>{{ material.title }}</strong>
+                        <span style="color: #666; margin-left: 20px;">发布时间: {{ material.publish_time.strftime('%Y-%m-%d %H:%M') }}</span>
+                        <span style="color: #999; margin-left: 10px;">| 下载次数: {{ material.download_count }}</span>
+                        {% if material.description %}
+                        <p style="margin-left: 40px; color: #666; font-size: 0.9em;">{{ material.description }}</p>
+                        {% endif %}
+                        <div style="margin-left: 40px; margin-top: 10px;">
+                            <a href="{{ url_for('download_material', material_id=material.material_id) }}" class="btn btn-primary">📥 下载 ({{ material.file_type.upper() }})</a>
+                            <span style="color: #999; margin-left: 10px; font-size: 0.9em;">文件: {{ material.file_name }}</span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                <div class="empty-state">暂无教学资料</div>
+                {% endif %}
+        </div>
+    </div>
+</body>
+</html>

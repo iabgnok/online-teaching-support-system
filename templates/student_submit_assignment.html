@@ -1,0 +1,120 @@
+{% from "macros.html" import dashboard_nav, unified_styles, page_header %}
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ title }} - 在线教学支持系统</title>
+    {{ unified_styles() }}
+    <style>
+        textarea {
+            width: 100%;
+            min-height: 200px;
+            padding: 10px;
+            box-sizing: border-box;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-family: inherit;
+            resize: vertical;
+        }
+        textarea:focus {
+            border-color: #3498db;
+            outline: none;
+        }
+        input[type="file"] {
+            width: 100%;
+            padding: 8px;
+            box-sizing: border-box;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+        }
+        .required { color: #dc3545; }
+        .deadline-warning { background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 15px 0; border-radius: 5px; }
+        .deadline-passed { background: #f8d7da; border-left: 4px solid #dc3545; padding: 15px; margin: 15px 0; border-radius: 5px; }
+        .existing-submission { background: #e7f3ff; border-left: 4px solid #007bff; padding: 15px; margin: 15px 0; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        {{ dashboard_nav('student') }}
+        
+        {{ page_header('📝 提交' + ('作业' if assignment.type == 'homework' else '考试'), '') }}
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="info-card">
+            <h3>课程信息</h3>
+            <p><strong>课程名称：</strong>{{ course.course_name }}</p>
+            <p><strong>{{ '作业' if assignment.type == 'homework' else '考试' }}标题：</strong>{{ assignment.title }}</p>
+            <p><strong>总分：</strong>{{ assignment.total_score }}</p>
+            <p><strong>截止时间：</strong>{{ assignment.deadline.strftime('%Y-%m-%d %H:%M') }}</p>
+            {% if assignment.description %}
+            <p><strong>说明：</strong></p>
+            <p style="white-space: pre-wrap; background: white; padding: 10px; border-radius: 4px;">{{ assignment.description }}</p>
+            {% endif %}
+        </div>
+
+        {% set now = [] %}
+        {% if now.__class__.__name__ == 'list' %}
+            {% set _ = now.append(1) %}
+        {% endif %}
+        
+        {% if assignment.deadline < assignment.deadline.__class__.now() %}
+        <div class="deadline-passed">
+            <strong>⚠️ 注意：</strong>已超过截止时间，提交可能不被接受或会被扣分。
+        </div>
+        {% elif (assignment.deadline - assignment.deadline.__class__.now()).total_seconds() < 86400 %}
+        <div class="deadline-warning">
+            <strong>⏰ 提醒：</strong>距离截止时间不足24小时，请尽快提交！
+        </div>
+        {% endif %}
+
+        {% if existing_submission %}
+        <div class="existing-submission">
+            <h4>📋 已有提交记录</h4>
+            <p><strong>提交时间：</strong>{{ existing_submission.submit_time.strftime('%Y-%m-%d %H:%M') }}</p>
+            <p><strong>状态：</strong>{{ '已批改' if existing_submission.status == 'graded' else '已提交' }}</p>
+            {% if existing_submission.status == 'graded' %}
+            <p><strong>得分：</strong><span style="font-size: 1.2em; color: #28a745;">{{ existing_submission.score }}</span></p>
+            {% if existing_submission.feedback %}
+            <p><strong>教师反馈：</strong></p>
+            <p style="background: white; padding: 10px; border-radius: 4px;">{{ existing_submission.feedback }}</p>
+            {% endif %}
+            {% endif %}
+            <p style="color: #666; font-size: 0.9em;">提交新内容将覆盖之前的提交</p>
+        </div>
+        {% endif %}
+
+        <form method="POST" enctype="multipart/form-data">
+            <div class="form-group">
+                <label for="content">提交内容 <span class="required">*</span></label>
+                <textarea id="content" name="content" placeholder="请输入您的答案或说明...">{% if existing_submission %}{{ existing_submission.content }}{% endif %}</textarea>
+            </div>
+
+            <div class="form-group">
+                <label for="file">上传文件（可选）</label>
+                <input type="file" id="file" name="file">
+                <small style="color: #666;">支持的文件格式：PDF, Word, Excel, PPT, TXT, ZIP, RAR, 图片等（最大100MB）</small>
+                {% if existing_submission and existing_submission.file_name %}
+                <p style="margin-top: 10px; background: #e7f3ff; padding: 8px; border-radius: 4px;">
+                    <strong>已上传文件：</strong>{{ existing_submission.file_name }}
+                    <a href="{{ url_for('download_submission_file', submission_id=existing_submission.submission_id) }}" style="margin-left: 10px; color: #007bff;">📥 下载</a>
+                </p>
+                {% endif %}
+            </div>
+
+            <div style="margin-top: 30px;">
+                <button type="submit" class="btn btn-primary">{{ '重新提交' if existing_submission else '提交' }}</button>
+                <a href="{{ url_for('student_class_detail', class_id=assignment.class_id) }}" class="btn btn-secondary">取消</a>
+            </div>
+        </form>
+    </div>
+</body>
+</html>

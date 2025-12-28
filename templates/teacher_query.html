@@ -1,0 +1,230 @@
+{% from "macros.html" import dashboard_nav, unified_styles, page_header %}
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ title }} - 在线教学支持系统</title>
+    {{ unified_styles() }}
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            document.querySelectorAll('.tab').forEach(function(tab) {
+                tab.addEventListener('click', function() {
+                    var url = this.getAttribute('data-url');
+                    if (url) location.href = url;
+                });
+            });
+        });
+    </script>
+</head>
+<body>
+    <div class="container">
+        {{ dashboard_nav('teacher') }}
+        
+        {{ page_header('🔍 信息查询', '查询学生、作业提交和成绩信息') }}
+        
+        <div class="tabs">
+            <div class="tab {% if query_type == 'student' %}active{% endif %}" data-url="{{ url_for('teacher_query', type='student') }}">
+                学生查询
+            </div>
+            <div class="tab {% if query_type == 'submission' %}active{% endif %}" data-url="{{ url_for('teacher_query', type='submission') }}">
+                作业提交查询
+            </div>
+            <div class="tab {% if query_type == 'grade' %}active{% endif %}" data-url="{{ url_for('teacher_query', type='grade') }}">
+                成绩查询
+            </div>
+        </div>
+        
+        <div class="content-section">
+            <form method="POST" action="{{ url_for('teacher_query') }}">
+                <input type="hidden" name="query_type" value="{{ query_type }}">
+                
+                {% if query_type == 'student' %}
+                <h3>学生查询条件（限任教班级）</h3>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>学号</label>
+                        <input type="text" name="student_no" placeholder="支持模糊查询">
+                    </div>
+                    <div class="form-group">
+                        <label>学生姓名</label>
+                        <input type="text" name="student_name" placeholder="支持模糊查询">
+                    </div>
+                    <div class="form-group">
+                        <label>教学班</label>
+                        <select name="class_id">
+                            <option value="">全部</option>
+                            {% for tc, course in teaching_classes %}
+                            <option value="{{ tc.class_id }}">{{ course.course_name }} - {{ tc.class_name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                
+                {% elif query_type == 'submission' %}
+                <h3>作业提交查询条件</h3>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>教学班</label>
+                        <select name="class_id">
+                            <option value="">全部</option>
+                            {% for tc, course in teaching_classes %}
+                            <option value="{{ tc.class_id }}">{{ course.course_name }} - {{ tc.class_name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>作业标题</label>
+                        <input type="text" name="assignment_title" placeholder="支持模糊查询">
+                    </div>
+                    <div class="form-group">
+                        <label>提交状态</label>
+                        <select name="status">
+                            <option value="">全部</option>
+                            <option value="submitted">已提交</option>
+                            <option value="graded">已批改</option>
+                        </select>
+                    </div>
+                </div>
+                
+                {% elif query_type == 'grade' %}
+                <h3>成绩查询条件（限任教班级）</h3>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>学号</label>
+                        <input type="text" name="student_no" placeholder="支持模糊查询">
+                    </div>
+                    <div class="form-group">
+                        <label>学生姓名</label>
+                        <input type="text" name="student_name" placeholder="支持模糊查询">
+                    </div>
+                    <div class="form-group">
+                        <label>教学班</label>
+                        <select name="class_id">
+                            <option value="">全部</option>
+                            {% for tc, course in teaching_classes %}
+                            <option value="{{ tc.class_id }}">{{ course.course_name }} - {{ tc.class_name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>最低成绩</label>
+                        <input type="number" name="min_grade" step="0.1" placeholder="如：60">
+                    </div>
+                    <div class="form-group">
+                        <label>最高成绩</label>
+                        <input type="number" name="max_grade" step="0.1" placeholder="如：100">
+                    </div>
+                </div>
+                {% endif %}
+                
+                <div style="margin-top: 20px;">
+                    <button type="submit" class="btn btn-primary">🔍 查询</button>
+                    <button type="reset" class="btn btn-secondary">🔄 重置</button>
+                </div>
+            </form>
+        </div>
+        
+        {% if results %}
+        <div class="result-count" style="display: flex; justify-content: space-between; align-items: center;">
+            <span>📊 查询结果：共 {{ results|length }} 条记录</span>
+            <a href="{{ url_for('teacher_query_export', type=query_type, **request.args) }}" class="btn btn-primary" style="text-decoration: none;">📥 导出CSV</a>
+        </div>
+        
+        {% if query_type == 'student' %}
+        <table>
+            <thead>
+                <tr>
+                    <th>学号</th>
+                    <th>姓名</th>
+                    <th>专业</th>
+                    <th>学院</th>
+                    <th>课程</th>
+                    <th>教学班</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for student, sc, tc, course in results %}
+                <tr>
+                    <td>{{ student.student_no }}</td>
+                    <td>{{ student.name }}</td>
+                    <td>{{ student.major or '-' }}</td>
+                    <td>{{ student.department.dept_name if student.department else '-' }}</td>
+                    <td>{{ course.course_name }}</td>
+                    <td>{{ tc.class_name }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        
+        {% elif query_type == 'submission' %}
+        <table>
+            <thead>
+                <tr>
+                    <th>学号</th>
+                    <th>姓名</th>
+                    <th>作业标题</th>
+                    <th>类型</th>
+                    <th>总分</th>
+                    <th>提交时间</th>
+                    <th>得分</th>
+                    <th>状态</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for submission, assignment, student in results %}
+                <tr>
+                    <td>{{ student.student_no }}</td>
+                    <td>{{ student.name }}</td>
+                    <td>{{ assignment.title }}</td>
+                    <td>{{ '作业' if assignment.type == 'homework' else '考试' }}</td>
+                    <td>{{ assignment.total_score }}</td>
+                    <td>{{ submission.submit_time.strftime('%Y-%m-%d %H:%M') if submission.submit_time else '-' }}</td>
+                    <td>{{ submission.score if submission.score is not none else '-' }}</td>
+                    <td class="{% if submission.status == 'graded' %}status-graded{% else %}status-submitted{% endif %}">
+                        {{ '已批改' if submission.status == 'graded' else '已提交' }}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        
+        {% elif query_type == 'grade' %}
+        <table>
+            <thead>
+                <tr>
+                    <th>学号</th>
+                    <th>姓名</th>
+                    <th>课程</th>
+                    <th>班级</th>
+                    <th>作业平均</th>
+                    <th>考试平均</th>
+                    <th>教师评价</th>
+                    <th>最终成绩</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for grade, student, tc, course in results %}
+                <tr>
+                    <td>{{ student.student_no }}</td>
+                    <td>{{ student.name }}</td>
+                    <td>{{ course.course_name }}</td>
+                    <td>{{ tc.class_name }}</td>
+                    <td>{{ '%.1f'|format(grade.homework_avg|float) }}</td>
+                    <td>{{ '%.1f'|format(grade.exam_avg|float) }}</td>
+                    <td>{{ '%.1f'|format(grade.teacher_evaluation|float) }}</td>
+                    <td><strong>{{ '%.1f'|format(grade.final_grade|float) }}</strong></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+        
+        {% elif request.method == 'POST' %}
+        <div class="no-results">
+            <p>😔 未找到符合条件的记录</p>
+            <p style="font-size: 0.9em;">请尝试调整查询条件</p>
+        </div>
+        {% endif %}
+    </div>
+</body>
+</html>

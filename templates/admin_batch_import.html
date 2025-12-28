@@ -1,0 +1,65 @@
+{% from "macros.html" import dashboard_nav, unified_styles, page_header %}
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ title }} - 管理员仪表板</title>
+    {{ unified_styles() }}
+    <style>
+        .tip { background-color: #e7f3ff; border-left: 5px solid #3498db; padding: 15px; margin-bottom: 20px; border-radius: 5px; }
+        .tip code { background-color: #e9ecef; padding: 2px 6px; border-radius: 3px; font-weight: bold; color: #e74c3c; }
+        input[type="file"] { margin-bottom: 15px; width: 100%; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        {{ dashboard_nav('admin') }}
+        
+        {{ page_header(title, '批量导入用户数据') }}
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="content-section">
+
+        <div class="tip">
+            <h3>导入文件要求 (CSV格式)</h3>
+            <p>文件必须是 CSV 格式，并包含以下 **列标题**。请严格按照顺序和名称定义，**带星号 (*) 为必填**。</p>
+            <p style="font-size: 0.9em;">
+                <code>username*</code>, <code>password*</code>, <code>real_name*</code>, <code>role*</code>, <code>role_no*</code>,
+                <code>phone</code>, <code>email</code>, <code>department*</code>, <code>major</code>, <code>title</code>
+            </p>
+            <p><strong>⚠️ 重要说明（数据库规范化）：</strong></p>
+            <ul>
+                <li><code>real_name</code> - 用户真实姓名（必填）</li>
+                <li><code>department</code> - 院系名称（<strong>必填</strong>，必须先通过"批量导入院系"功能导入）</li>
+                <li><code>role</code> 必须是 <code>admin</code>, <code>teacher</code> 或 <code>student</code></li>
+                <li><code>role_no</code> 对应：管理员的 <code>admin_no</code> / 教师的 <code>teacher_no</code> (工号) / 学生的 <code>student_no</code> (学号)</li>
+                <li><code>major</code> - 学生专业（仅 student 角色需要）</li>
+                <li><code>title</code> - 教师职称（仅 teacher 角色需要，如：教授、副教授、讲师）</li>
+                <li>密码将自动进行哈希加密</li>
+                <li><strong>必须先导入院系数据，否则导入会失败！</strong></li>
+            </ul>
+            <p><strong>📋 示例数据（前3行）：</strong></p>
+            <pre style="background: #f8f9fa; padding: 10px; border-radius: 5px; overflow-x: auto; font-size: 0.85em;">username,password,real_name,role,role_no,phone,email,department,major,title
+teacher100,Passw0rd!,王建国,teacher,T100,13800020100,wangjg@edu.cn,软件工程学院,,教授
+student100,Passw0rd!,赵天宇,student,3123005001,13900030100,zhaoty@stu.edu.cn,软件工程学院,软件工程,</pre>
+        </div>
+
+        <div class="content-section">
+        <form method="POST" enctype="multipart/form-data">
+            <div class="form-group">
+                <label for="file">选择 CSV 文件:</label>
+                <input type="file" id="file" name="file" accept=".csv" required>
+            </div>
+            <button type="submit" class="btn btn-primary">📤 上传并导入数据</button>
+        </form>
+        </div>
+    </div>
+</body>
+</html>

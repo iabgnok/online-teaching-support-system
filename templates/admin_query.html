@@ -1,0 +1,344 @@
+{% from "macros.html" import dashboard_nav, unified_styles, page_header %}
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ title }} - 在线教学支持系统</title>
+    {{ unified_styles() }}
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            document.querySelectorAll('.tab').forEach(function(tab) {
+                tab.addEventListener('click', function() {
+                    var url = this.getAttribute('data-url');
+                    if (url) {
+                        window.location.href = url;
+                    }
+                });
+            });
+        });
+    </script>
+</head>
+<body>
+    <div class="container">
+        {{ dashboard_nav('admin') }}
+        
+        {{ page_header('🔍 综合查询', '查询用户、课程、教学班、成绩等各类信息') }}
+        
+        <div class="tabs">
+            <div class="tab {% if query_type == 'user' %}active{% endif %}" data-url="{{ url_for('admin_query', type='user') }}">
+                用户查询
+            </div>
+            <div class="tab {% if query_type == 'course' %}active{% endif %}" data-url="{{ url_for('admin_query', type='course') }}">
+                课程查询
+            </div>
+            <div class="tab {% if query_type == 'class' %}active{% endif %}" data-url="{{ url_for('admin_query', type='class') }}">
+                教学班查询
+            </div>
+            <div class="tab {% if query_type == 'grade' %}active{% endif %}" data-url="{{ url_for('admin_query', type='grade') }}">
+                成绩查询
+            </div>
+        </div>
+        
+        <div class="content-section">
+            <form method="POST" action="{{ url_for('admin_query') }}">
+                <input type="hidden" name="query_type" value="{{ query_type }}">
+                
+                {% if query_type == 'user' %}
+                <h3>用户查询条件</h3>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>用户名</label>
+                        <input type="text" name="username" placeholder="支持模糊查询">
+                    </div>
+                    <div class="form-group">
+                        <label>真实姓名</label>
+                        <input type="text" name="real_name" placeholder="支持模糊查询">
+                    </div>
+                    <div class="form-group">
+                        <label>角色</label>
+                        <select name="role">
+                            <option value="">全部</option>
+                            <option value="admin">管理员</option>
+                            <option value="teacher">教师</option>
+                            <option value="student">学生</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>状态</label>
+                        <select name="status">
+                            <option value="">全部</option>
+                            <option value="1">激活</option>
+                            <option value="0">禁用</option>
+                        </select>
+                    </div>
+                </div>
+                
+                {% elif query_type == 'course' %}
+                <h3>课程查询条件</h3>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>课程代码</label>
+                        <input type="text" name="course_code" placeholder="支持模糊查询">
+                    </div>
+                    <div class="form-group">
+                        <label>课程名称</label>
+                        <input type="text" name="course_name" placeholder="支持模糊查询">
+                    </div>
+                    <div class="form-group">
+                        <label>课程类型</label>
+                        <input type="text" name="course_type" placeholder="如：必修、选修">
+                    </div>
+                </div>
+                
+                {% elif query_type == 'class' %}
+                <h3>教学班查询条件</h3>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>课程名称</label>
+                        <input type="text" name="course_name" placeholder="支持模糊查询">
+                    </div>
+                    <div class="form-group">
+                        <label>班级名称</label>
+                        <input type="text" name="class_name" placeholder="支持模糊查询">
+                    </div>
+                    <div class="form-group">
+                        <label>学期</label>
+                        <input type="text" name="semester" placeholder="如：2024-2025-1">
+                    </div>
+                </div>
+                
+                {% elif query_type == 'grade' %}
+                <h3>成绩查询条件</h3>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>学号</label>
+                        <input type="text" name="student_no" placeholder="支持模糊查询">
+                    </div>
+                    <div class="form-group">
+                        <label>学生姓名</label>
+                        <input type="text" name="student_name" placeholder="支持模糊查询">
+                    </div>
+                    <div class="form-group">
+                        <label>课程名称</label>
+                        <input type="text" name="course_name" placeholder="支持模糊查询">
+                    </div>
+                    <div class="form-group">
+                        <label>最低成绩</label>
+                        <input type="number" name="min_grade" step="0.1" placeholder="如：60">
+                    </div>
+                    <div class="form-group">
+                        <label>最高成绩</label>
+                        <input type="number" name="max_grade" step="0.1" placeholder="如：100">
+                    </div>
+                </div>
+                {% endif %}
+                
+                <div style="margin-top: 20px;">
+                    <button type="submit" class="btn btn-primary">🔍 查询</button>
+                    <button type="reset" class="btn btn-secondary">🔄 重置</button>
+                </div>
+            </form>
+        </div>
+        
+        {% if results %}
+        <div class="content-section">
+            <div class="result-count" style="display: flex; justify-content: space-between; align-items: center;">
+                <span>📊 查询结果：共 {{ results|length }} 条记录</span>
+                <div>
+                    {% if query_type == 'user' %}
+                    <button onclick="toggleContactInfo()" class="btn btn-secondary" style="margin-right: 10px;" id="toggleContactBtn">
+                        👁️ 显示联系方式
+                    </button>
+                    {% endif %}
+                    <a href="{{ url_for('admin_query_export', type=query_type, **request.args) }}" class="btn btn-success" style="text-decoration: none;">📥 导出CSV</a>
+                </div>
+            </div>
+        
+        <div style="overflow-x: auto;">
+        
+        {% if query_type == 'user' %}
+        <table>
+            <thead>
+                <tr>
+                    <th>用户ID</th>
+                    <th>用户名</th>
+                    <th>真实姓名</th>
+                    <th>角色</th>
+                    <th>工号/学号</th>
+                    <th>学院/部门</th>
+                    <th>职称</th>
+                    <th>专业</th>
+                    <th class="contact-column" style="display: none;">手机号</th>
+                    <th class="contact-column" style="display: none;">邮箱</th>
+                    <th>状态</th>
+                    <th>创建时间</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for user in results %}
+                <tr>
+                    <td>{{ user.user_id }}</td>
+                    <td>{{ user.username }}</td>
+                    <td>{{ user.real_name }}</td>
+                    <td>
+                        {% if user.role == 'admin' %}管理员
+                        {% elif user.role == 'teacher' %}教师
+                        {% elif user.role == 'student' %}学生
+                        {% else %}{{ user.role }}{% endif %}
+                    </td>
+                    <td>
+                        {% if user.role == 'admin' and user.admin_profile %}
+                            {{ user.admin_profile.admin_no }}
+                        {% elif user.role == 'teacher' and user.teacher_profile %}
+                            {{ user.teacher_profile.teacher_no }}
+                        {% elif user.role == 'student' and user.student_profile %}
+                            {{ user.student_profile.student_no }}
+                        {% else %}-{% endif %}
+                    </td>
+                    <td>
+                        {% if user.role == 'admin' and user.admin_profile and user.admin_profile.department %}
+                            {{ user.admin_profile.department.dept_name }}
+                        {% elif user.role == 'teacher' and user.teacher_profile and user.teacher_profile.department %}
+                            {{ user.teacher_profile.department.dept_name }}
+                        {% elif user.role == 'student' and user.student_profile and user.student_profile.department %}
+                            {{ user.student_profile.department.dept_name }}
+                        {% else %}-{% endif %}
+                    </td>
+                    <td>
+                        {% if user.role == 'teacher' and user.teacher_profile %}
+                            {{ user.teacher_profile.title or '-' }}
+                        {% else %}-{% endif %}
+                    </td>
+                    <td>
+                        {% if user.role == 'student' and user.student_profile %}
+                            {{ user.student_profile.major or '-' }}
+                        {% else %}-{% endif %}
+                    </td>
+                    <td class="contact-column" style="display: none;">{{ user.phone or '-' }}</td>
+                    <td class="contact-column" style="display: none;">{{ user.email or '-' }}</td>
+                    <td class="{% if user.status == 1 %}status-active{% else %}status-inactive{% endif %}">
+                        {{ '激活' if user.status == 1 else '禁用' }}
+                    </td>
+                    <td>{{ user.created_at.strftime('%Y-%m-%d') if user.created_at else '-' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        
+        <script>
+        let contactVisible = false;
+        function toggleContactInfo() {
+            contactVisible = !contactVisible;
+            const contactColumns = document.querySelectorAll('.contact-column');
+            const toggleBtn = document.getElementById('toggleContactBtn');
+            
+            contactColumns.forEach(col => {
+                col.style.display = contactVisible ? 'table-cell' : 'none';
+            });
+            
+            toggleBtn.textContent = contactVisible ? '🙈 隐藏联系方式' : '👁️ 显示联系方式';
+        }
+        </script>
+        
+        {% elif query_type == 'course' %}
+        <table>
+            <thead>
+                <tr>
+                    <th>课程代码</th>
+                    <th>课程名称</th>
+                    <th>学分</th>
+                    <th>学时</th>
+                    <th>课程类型</th>
+                    <th>描述</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for course in results %}
+                <tr>
+                    <td>{{ course.course_code }}</td>
+                    <td>{{ course.course_name }}</td>
+                    <td>{{ course.credit }}</td>
+                    <td>{{ course.hours or '-' }}</td>
+                    <td>{{ course.course_type or '-' }}</td>
+                    <td>{{ (course.description[:50] + '...') if course.description and course.description|length > 50 else (course.description or '-') }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        
+        {% elif query_type == 'class' %}
+        <table>
+            <thead>
+                <tr>
+                    <th>课程名称</th>
+                    <th>班级名称</th>
+                    <th>学期</th>
+                    <th>上课时间</th>
+                    <th>教室</th>
+                    <th>容量</th>
+                    <th>状态</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for teaching_class, course in results %}
+                <tr>
+                    <td>{{ course.course_name }}</td>
+                    <td>{{ teaching_class.class_name }}</td>
+                    <td>{{ teaching_class.semester }}</td>
+                    <td>{{ teaching_class.class_time or '-' }}</td>
+                    <td>{{ teaching_class.classroom or '-' }}</td>
+                    <td>{{ teaching_class.capacity or '-' }}</td>
+                    <td class="{% if teaching_class.status == 1 %}status-active{% else %}status-inactive{% endif %}">
+                        {{ '开课中' if teaching_class.status == 1 else '已结束' }}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        
+        {% elif query_type == 'grade' %}
+        <table>
+            <thead>
+                <tr>
+                    <th>学号</th>
+                    <th>姓名</th>
+                    <th>课程名称</th>
+                    <th>班级</th>
+                    <th>作业平均</th>
+                    <th>考试平均</th>
+                    <th>教师评价</th>
+                    <th>最终成绩</th>
+                    <th>计算时间</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for grade, student, teaching_class, course in results %}
+                <tr>
+                    <td>{{ student.student_no }}</td>
+                    <td>{{ student.name }}</td>
+                    <td>{{ course.course_name }}</td>
+                    <td>{{ teaching_class.class_name }}</td>
+                    <td>{{ '%.1f'|format(grade.homework_avg|float) }}</td>
+                    <td>{{ '%.1f'|format(grade.exam_avg|float) }}</td>
+                    <td>{{ '%.1f'|format(grade.teacher_evaluation|float) }}</td>
+                    <td><strong>{{ '%.1f'|format(grade.final_grade|float) }}</strong></td>
+                    <td>{{ grade.calculated_at.strftime('%Y-%m-%d') if grade.calculated_at else '-' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        {% endif %}
+        </div>
+        
+        {% elif request.method == 'POST' %}
+        <div class="content-section">
+            <div class="empty-state">
+                <p>😔 未找到符合条件的记录</p>
+                <p style="font-size: 0.9em;">请尝试调整查询条件</p>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</body>
+</html>
