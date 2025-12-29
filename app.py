@@ -1,43 +1,45 @@
-# app.py
+"""在线教学支持系统 - 主应用"""
 
-# ----------------------- 1. 导入必要的库 -----------------------
+# ==================== 导入依赖 ====================
 from flask import Flask, render_template, redirect, url_for, request, flash, abort, send_file, make_response
 from functools import wraps
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, login_user, logout_user, current_user, login_required
-from config import DevelopmentConfig # 导入配置类
-import csv # 用于处理 CSV 文件导入
-import io # 用于处理内存中的文件流
+from config import DevelopmentConfig
+import csv
+import io
 from datetime import datetime
 import os
 from werkzeug.utils import secure_filename
-from models import Users, Admin, Student, Teacher, Course, TeachingClass, StudentClass, TeacherClass, Assignment, Submission, Grade, Material, Department, db # 导入核心用户模型和 db 实例
+from models import Users, Admin, Student, Teacher, Course, TeachingClass, StudentClass, TeacherClass, Assignment, Submission, Grade, Material, Department, db
 
-# ----------------------- 2. 初始化 Flask 应用和配置 -----------------------
+# ==================== 应用初始化 ====================
 app = Flask(__name__)
-# 从 config.py 中加载 DevelopmentConfig 类中的所有大写变量
 app.config.from_object(DevelopmentConfig)
 
-# ----------------------- 3. 初始化扩展 (Extensions) -----------------------
+# ==================== 扩展初始化 ====================
 db.init_app(app)
 login_manager = LoginManager(app)
-login_manager.login_view = 'login' 
+login_manager.login_view = 'login'
 login_manager.login_message_category = 'info'
 
 # 确保上传目录存在
 os.makedirs(app.config['MATERIALS_FOLDER'], exist_ok=True)
 os.makedirs(app.config['ASSIGNMENTS_FOLDER'], exist_ok=True)
 
-# 文件上传辅助函数
+# ----------------------- 辅助函数 -----------------------
+
+def generate_next_id(model, id_field='id'):
+    """生成模型的下一个ID"""
+    max_id = db.session.query(db.func.max(getattr(model, id_field))).scalar()
+    return (max_id or 0) + 1
+
 def allowed_file(filename):
     """检查文件扩展名是否允许"""
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
 def get_or_create_department(dept_name):
-    """
-    获取或创建部门
-    如果部门名称存在，返回其 dept_id；否则创建新部门并返回 dept_id
-    """
+    """获取或创建部门，返回部门ID"""
     if not dept_name or dept_name.strip() == '':
         return None
     
@@ -46,38 +48,36 @@ def get_or_create_department(dept_name):
     if dept:
         return dept.dept_id
     
-    # 创建新部门
-    max_dept_id = db.session.query(db.func.max(Department.dept_id)).scalar()
-    new_dept_id = (max_dept_id or 0) + 1
     new_dept = Department(
-        dept_id=new_dept_id,
+        dept_id=generate_next_id(Department, 'dept_id'),
         dept_name=dept_name
     )
     db.session.add(new_dept)
-    db.session.flush()  # 立即获取 dept_id
-    return new_dept_id 
+    db.session.flush()
+    return new_dept.dept_id 
 
 
-# ----------------------- 4. Flask-Login 核心回调函数 -----------------------
+# ==================== Flask-Login 配置 ====================
+
 @login_manager.user_loader
 def load_user(user_id):
-    """根据 user_id 返回对应的用户对象"""
+    """加载用户对象"""
     return db.session.get(Users, user_id) 
 
 def role_required(role):
-    """自定义权限装饰器：只允许特定角色的用户访问"""
+    """角色权限装饰器：限制特定角色访问"""
     def wrapper(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
             if current_user.role != role:
                 flash(f'您没有权限访问 {role} 页面。', 'danger')
-                abort(403) 
+                abort(403)
             return f(*args, **kwargs)
         return decorated_function
     return wrapper
 
 def admin_permission_required(level):
-    """自定义管理员权限装饰器：检查管理员权限级别"""
+    """管理员权限装饰器：检查权限级别（数字越小权限越高）"""
     def wrapper(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
@@ -92,28 +92,24 @@ def admin_permission_required(level):
         return decorated_function
     return wrapper
 
-# ----------------------- 5. 路由定义 (Views/Controllers) -----------------------
+# ==================== 用户认证路由 ====================
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    """用户登录处理"""
+    """用户登录"""
     if current_user.is_authenticated:
         return redirect(url_for('index'))
 
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
-
         user = Users.query.filter_by(username=username).first()
         
-        # 验证用户和密码
         if user is None or not user.verify_password(password):
             flash('用户名或密码错误。', 'danger')
             return redirect(url_for('login'))
 
-        # 登录成功
         login_user(user)
-        
         next_page = request.args.get('next')
         return redirect(next_page or url_for('index'))
 
@@ -121,13 +117,12 @@ def login():
 
 
 @app.route('/logout')
-@login_required 
+@login_required
 def logout():
-    """用户登出处理"""
+    """用户登出"""
     logout_user()
     flash('您已安全退出。', 'info')
     return redirect(url_for('login'))
-
 
 @app.route('/change_password', methods=['GET', 'POST'])
 @login_required
@@ -138,31 +133,22 @@ def change_password():
         new_password = request.form['new_password']
         confirm_password = request.form['confirm_password']
         
-        # 验证旧密码
         if not current_user.check_password(old_password):
             flash('旧密码不正确！', 'danger')
-            return redirect(url_for('change_password'))
-        
-        # 验证新密码
-        if len(new_password) < 6:
+        elif len(new_password) < 6:
             flash('新密码长度不能少于6位！', 'danger')
-            return redirect(url_for('change_password'))
-        
-        if new_password != confirm_password:
+        elif new_password != confirm_password:
             flash('两次输入的新密码不一致！', 'danger')
-            return redirect(url_for('change_password'))
-        
-        if new_password == old_password:
+        elif new_password == old_password:
             flash('新密码不能与旧密码相同！', 'warning')
-            return redirect(url_for('change_password'))
+        else:
+            current_user.set_password(new_password)
+            db.session.commit()
+            flash('密码修改成功！请使用新密码重新登录。', 'success')
+            logout_user()
+            return redirect(url_for('login'))
         
-        # 更新密码
-        current_user.set_password(new_password)
-        db.session.commit()
-        
-        flash('密码修改成功！请使用新密码重新登录。', 'success')
-        logout_user()
-        return redirect(url_for('login'))
+        return redirect(url_for('change_password'))
     
     return render_template('change_password.html', title='修改密码')
 
@@ -170,7 +156,7 @@ def change_password():
 @app.route('/edit_profile', methods=['GET', 'POST'])
 @login_required
 def edit_profile():
-    """编辑个人资料（仅限学生和教师）"""
+    """编辑个人资料"""
     if current_user.role == 'admin':
         flash('管理员不支持此功能！', 'warning')
         return redirect(url_for('admin_dashboard'))
@@ -179,23 +165,17 @@ def edit_profile():
         phone = request.form.get('phone', '').strip()
         email = request.form.get('email', '').strip()
         
-        # 验证邮箱格式（简单验证）
         if email and '@' not in email:
             flash('邮箱格式不正确！', 'danger')
             return redirect(url_for('edit_profile'))
         
-        # 更新用户信息
-        current_user.phone = phone if phone else None
-        current_user.email = email if email else None
-        
+        current_user.phone = phone or None
+        current_user.email = email or None
         db.session.commit()
         flash('个人资料更新成功！', 'success')
         
-        # 根据角色跳转到相应的仪表盘
-        if current_user.role == 'student':
-            return redirect(url_for('student_dashboard'))
-        else:
-            return redirect(url_for('teacher_dashboard'))
+        dashboard = 'student_dashboard' if current_user.role == 'student' else 'teacher_dashboard'
+        return redirect(url_for(dashboard))
     
     return render_template('edit_profile.html', title='编辑个人资料')
 
@@ -203,29 +183,23 @@ def edit_profile():
 @app.route('/')
 @login_required
 def index():
-    """首页 - 根据用户角色显示不同的功能选择页"""
-    role = current_user.role
-    
-    if role == 'student':
-        # 学生主页通常是 dashboard，不需要跳转
-        return redirect(url_for('student_dashboard'))
-    elif role == 'teacher':
-        # 假设教师也有一个 dashboard 路由
-        return redirect(url_for('teacher_dashboard'))
-    elif role == 'admin':
-        # 管理员功能选择页
-        return redirect(url_for('admin_dashboard'))
-    
-    return redirect(url_for('logout'))
+    """首页：根据角色跳转到相应的仪表板"""
+    role_dashboards = {
+        'student': 'student_dashboard',
+        'teacher': 'teacher_dashboard',
+        'admin': 'admin_dashboard'
+    }
+    dashboard = role_dashboards.get(current_user.role, 'logout')
+    return redirect(url_for(dashboard))
 
 
-# ==================== 管理员模块路由 ====================
+# ==================== 管理员路由 ====================
 
 @app.route('/admin_dashboard')
 @login_required
 @role_required('admin')
 def admin_dashboard():
-    """管理员主页/功能选择页"""
+    """管理员主页"""
     admin = current_user.admin_profile
     permission_level = admin.permission_level if admin else 3
     return render_template('admin_dashboard.html', 
@@ -238,7 +212,7 @@ def admin_dashboard():
 @login_required
 @admin_permission_required(2)
 def admin_user_management():
-    """管理员：用户列表与管理页面（需要中级权限）"""
+    """用户管理（需要中级权限）"""
     
     # 获取筛选条件
     role_filter = request.args.get('role', '')
@@ -279,17 +253,18 @@ def admin_user_management():
 @login_required
 @role_required('admin')
 def admin_toggle_status(user_id):
-    """管理员：激活/禁用用户状态"""
+    """切换用户状态（激活/禁用）"""
     user = db.session.get(Users, user_id)
     
-    if user and user.user_id != current_user.user_id: 
-        user.status = 1 if user.status == 0 else 0
-        db.session.commit()
-        flash(f'用户 {user.username} 的状态已更新为 {"激活" if user.status == 1 else "禁用"}。', 'success')
-    elif user and user.user_id == current_user.user_id:
+    if not user:
+        flash('未找到该用户。', 'danger')
+    elif user.user_id == current_user.user_id:
         flash('无法禁用当前登录用户。', 'danger')
     else:
-        flash('未找到该用户。', 'danger')
+        user.status = 1 - user.status
+        db.session.commit()
+        status_text = "激活" if user.status == 1 else "禁用"
+        flash(f'用户 {user.username} 的状态已更新为 {status_text}。', 'success')
     
     return redirect(url_for('admin_user_management'))
 
@@ -521,9 +496,7 @@ def admin_create_user():
             return redirect(url_for('admin_create_user'))
             
         try:
-            # 生成新的 user_id
-            max_user = db.session.query(db.func.max(Users.user_id)).scalar()
-            new_user_id = (max_user or 0) + 1
+            new_user_id = generate_next_id(Users, 'user_id')
             
             # 创建 Users 记录
             new_user = Users(
@@ -541,7 +514,7 @@ def admin_create_user():
             # 根据角色创建对应的角色表记录
             if role == 'admin':
                 admin_no = request.form.get('admin_no')
-                permission_level = request.form.get('permission_level', 3)  # 默认为3级权限
+                permission_level = request.form.get('permission_level', 3)
                 if not admin_no:
                     flash('管理员编号不能为空。', 'danger')
                     return redirect(url_for('admin_create_user'))
@@ -549,15 +522,10 @@ def admin_create_user():
                     flash(f'创建失败：管理员编号 {admin_no} 已存在。', 'danger')
                     return redirect(url_for('admin_create_user'))
                 
-                max_admin = db.session.query(db.func.max(Admin.admin_id)).scalar()
-                new_admin_id = (max_admin or 0) + 1
-                
-                # 处理部门
-                dept_name = request.form.get('department')
-                dept_id = get_or_create_department(dept_name) if dept_name else None
+                dept_id = get_or_create_department(request.form.get('department')) if request.form.get('department') else None
                 
                 new_admin = Admin(
-                    admin_id=new_admin_id,
+                    admin_id=generate_next_id(Admin, 'admin_id'),
                     user_id=new_user_id,
                     admin_no=admin_no,
                     dept_id=dept_id,
@@ -568,8 +536,6 @@ def admin_create_user():
                 
             elif role == 'teacher':
                 teacher_no = request.form.get('teacher_no')
-                department = request.form.get('department')
-                title_rank = request.form.get('title')
                 
                 if not teacher_no:
                     flash('教师工号不能为空。', 'danger')
@@ -578,47 +544,36 @@ def admin_create_user():
                     flash(f'创建失败：教师工号 {teacher_no} 已存在。', 'danger')
                     return redirect(url_for('admin_create_user'))
                 
-                max_teacher = db.session.query(db.func.max(Teacher.teacher_id)).scalar()
-                new_teacher_id = (max_teacher or 0) + 1
-                
-                # 处理部门
-                dept_name = request.form.get('department')
-                dept_id = get_or_create_department(dept_name) if dept_name else None
+                dept_id = get_or_create_department(request.form.get('department')) if request.form.get('department') else None
                 
                 new_teacher = Teacher(
-                    teacher_id=new_teacher_id,
+                    teacher_id=generate_next_id(Teacher, 'teacher_id'),
                     user_id=new_user_id,
                     teacher_no=teacher_no,
                     dept_id=dept_id,
-                    title=title_rank
+                    title=request.form.get('title')
                 )
                 db.session.add(new_teacher)
                 flash(f'✅ 教师账户 {real_name} (工号: {teacher_no}) 创建成功！', 'success')
                 
             elif role == 'student':
                 student_no = request.form.get('student_no')
-                major = request.form.get('major')
                 
                 if not student_no:
-                    flash('学号不能为空。', 'danger')
+                    flash('学生学号不能为空。', 'danger')
                     return redirect(url_for('admin_create_user'))
                 if Student.query.filter_by(student_no=student_no).first():
-                    flash(f'创建失败：学号 {student_no} 已存在。', 'danger')
+                    flash(f'创建失败：学生学号 {student_no} 已存在。', 'danger')
                     return redirect(url_for('admin_create_user'))
                 
-                max_student = db.session.query(db.func.max(Student.student_id)).scalar()
-                new_student_id = (max_student or 0) + 1
-                
-                # 处理部门
-                dept_name = request.form.get('department')
-                dept_id = get_or_create_department(dept_name) if dept_name else None
+                dept_id = get_or_create_department(request.form.get('department')) if request.form.get('department') else None
                 
                 new_student = Student(
-                    student_id=new_student_id,
+                    student_id=generate_next_id(Student, 'student_id'),
                     user_id=new_user_id,
                     student_no=student_no,
                     dept_id=dept_id,
-                    major=major
+                    major=request.form.get('major')
                 )
                 db.session.add(new_student)
                 flash(f'✅ 学生账户 {real_name} (学号: {student_no}) 创建成功！', 'success')
@@ -822,11 +777,9 @@ def admin_batch_import():
                     continue
 
                 try:
-                    # 1. 生成新的 user_id
-                    max_user = db.session.query(db.func.max(Users.user_id)).scalar()
-                    new_user_id = (max_user or 0) + 1
+                    new_user_id = generate_next_id(Users, 'user_id')
                     
-                    # 2. 创建 Users 记录
+                    # 创建 Users 记录
                     new_user = Users(
                         user_id=new_user_id,
                         username=username,
@@ -839,63 +792,49 @@ def admin_batch_import():
                     new_user.set_password(password)
                     db.session.add(new_user)
                     
-                    # 处理部门：检查部门是否存在
                     dept_id = get_or_create_department(department)
                     if not dept_id:
                         error_details.append(f"第 {line_num} 行 (用户: {username}) 导入失败： 院系 '{department}' 不存在或创建失败。")
                         savepoint.rollback()
                         continue
                     
-                    # 3. 创建角色特定记录
+                    # 创建角色特定记录
                     if role == 'admin':
-                        max_admin = db.session.query(db.func.max(Admin.admin_id)).scalar()
-                        new_admin_id = (max_admin or 0) + 1
                         new_role = Admin(
-                            admin_id=new_admin_id,
+                            admin_id=generate_next_id(Admin, 'admin_id'),
                             user_id=new_user_id,
                             admin_no=role_no,
                             dept_id=dept_id
                         )
                     elif role == 'teacher':
-                        max_teacher = db.session.query(db.func.max(Teacher.teacher_id)).scalar()
-                        new_teacher_id = (max_teacher or 0) + 1
                         new_role = Teacher(
-                            teacher_id=new_teacher_id,
+                            teacher_id=generate_next_id(Teacher, 'teacher_id'),
                             user_id=new_user_id,
                             teacher_no=role_no,
                             dept_id=dept_id,
                             title=row.get('title')
                         )
                     elif role == 'student':
-                        max_student = db.session.query(db.func.max(Student.student_id)).scalar()
-                        new_student_id = (max_student or 0) + 1
                         new_role = Student(
-                            student_id=new_student_id,
+                            student_id=generate_next_id(Student, 'student_id'),
                             user_id=new_user_id,
                             student_no=role_no,
                             dept_id=dept_id,
                             major=row.get('major')
-                            # grade 和 class_name 已从 Student 表中删除，不再存储
                         )
                     db.session.add(new_role)
                     success_count += 1
-                    
-                    # 成功后释放保存点，准备下一次提交
-                    # 实际上，只要不调用 savepoint.rollback()，它会隐式合并到外部事务中
                 
                 except Exception as e:
-                    # 捕获数据库插入失败（如工号/学号/Admin ID 重复）
                     error_details.append(f"第 {line_num} 行（用户: {username}）导入失败： {e}")
-                    savepoint.rollback() # 明确回滚到此保存点
-                    continue # 继续下一行
+                    savepoint.rollback()
+                    continue
                 
-            # 提交外部事务，所有成功的记录会被写入数据库
-            db.session.commit() 
+            db.session.commit()
             
-            if error_details:
-                flash(f'⚠️ 批量导入完成。总行数: {total_rows}，成功: {success_count}，失败: {len(error_details)}。', 'warning')
-            else:
-                flash(f'✅ 批量导入成功！总计导入 {success_count} 条记录。', 'success')
+            status = 'warning' if error_details else 'success'
+            message = f'⚠️ 批量导入完成。总行数: {total_rows}，成功: {success_count}，失败: {len(error_details)}。' if error_details else f'✅ 批量导入成功！总计导入 {success_count} 条记录。'
+            flash(message, status)
             
             # 将错误详情传递给模板显示
             return render_template('admin_batch_import.html', 
@@ -903,7 +842,6 @@ def admin_batch_import():
                                    error_details=error_details)
             
         except Exception as e:
-            # 捕获文件读取或外部事务失败
             db.session.rollback()
             flash(f'❌ 导入过程发生致命错误: {e}', 'danger')
             return redirect(request.url)
@@ -952,11 +890,8 @@ def admin_import_courses():
                 continue
             
             try:
-                max_id = db.session.query(db.func.max(Course.course_id)).scalar()
-                new_id = (max_id or 0) + 1
-                
                 new_course = Course(
-                    course_id=new_id,
+                    course_id=generate_next_id(Course, 'course_id'),
                     course_code=course_code,
                     course_name=course_name,
                     credit=float(row.get('credit')) if row.get('credit') else None,
