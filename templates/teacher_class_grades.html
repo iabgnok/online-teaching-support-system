@@ -1,4 +1,4 @@
-{% from "macros.html" import dashboard_nav, unified_styles %}
+﻿{% from "macros.html" import dashboard_nav, unified_styles %}
 <!DOCTYPE html>
 <html lang="zh">
 <head>
@@ -9,6 +9,10 @@
         /* 页面特定样式 */
         .grade-excellent { color: #28a745; font-weight: bold; }
         .grade-fail { color: #dc3545; font-weight: bold; }
+        .badge { padding: 4px 10px; border-radius: 12px; font-size: 0.85em; font-weight: 600; }
+        .badge-success { background: #d4edda; color: #155724; }
+        .badge-warning { background: #fff3cd; color: #856404; }
+        .locked-row { background-color: #f8f9fa !important; }
         input[type="number"] { 
             width: 100px; 
             padding: 6px; 
@@ -20,17 +24,27 @@
             border-color: #3498db;
             outline: none;
         }
+        input[type="number"]:disabled {
+            background-color: #e9ecef;
+            cursor: not-allowed;
+        }
+        .action-buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 25px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="nav-bar">
             <div class="nav-links">
-                <a href="{{ url_for('teacher_class_detail', class_id=class_id) }}">← 返回班级详情</a>
+                <a href="{{ url_for('teacher_class_detail', class_id=class_id) }}"> 返回班级详情</a>
             </div>
             <div class="nav-links">
-                <a href="{{ url_for('change_password') }}">🔐 修改密码</a>
-                <a href="{{ url_for('logout') }}" style="color: #dc3545;">� 退出登录</a>
+                <a href="{{ url_for('change_password') }}"> 修改密码</a>
+                <a href="{{ url_for('logout') }}" style="color: #dc3545;"> 退出登录</a>
             </div>
         </div>
         
@@ -49,20 +63,38 @@
             {% endif %}
         {% endwith %}
 
-        <div class="content-section" style="background: #fff3cd; border-left: 4px solid #ffc107;">
-            <h3 style="color: #856404; margin: 0 0 15px 0;">📊 成绩计算规则</h3>
-            <p><strong>最终成绩 = 作业平均分 × 40% + 考试平均分 × 40% + 教师课末评价 × 20%</strong></p>
+        <div class="content-section" style="background: #e7f3ff; border-left: 4px solid #3498db;">
+            <h3 style="color: #0c5460; margin: 0 0 15px 0;"> 成绩计算规则</h3>
+            <p><strong>最终成绩 = 作业平均分  30% + 考试平均分  50% + 教师课末评价  20%</strong></p>
             <ul>
                 <li>作业平均分：自动计算该学生所有作业的平均分（包括已批改的实际分数和未提交/未批改的0分）</li>
                 <li>考试平均分：自动计算该学生所有考试的平均分（包括已批改的实际分数和未提交/未批改的0分）</li>
                 <li>教师课末评价：需要教师手动录入（0-100分）</li>
             </ul>
-            <p style="color: #dc3545;"><strong>注意：</strong>点击"计算并发布成绩"后，系统将根据上述规则自动计算所有学生的最终成绩。</p>
         </div>
 
+        {% if has_finalized %}
+        <div class="content-section" style="background: #d4edda; border-left: 4px solid #28a745;">
+            <h3 style="color: #155724; margin: 0 0 10px 0;"> 成绩归档状态</h3>
+            {% if all_finalized %}
+                <p><strong>所有学生的成绩已归档并锁定</strong>，成绩不会再因作业批改而变化。</p>
+            {% else %}
+                <p><strong>部分学生的成绩已归档</strong>，已归档的成绩将显示为 <span class="badge badge-success">已归档</span> 标识。</p>
+            {% endif %}
+            <p style="margin: 10px 0 0 0; font-size: 0.9em; color: #666;">如需重新计算已归档的成绩，请勾选"重新归档"选项。</p>
+        </div>
+        {% else %}
+        <div class="content-section" style="background: #fff3cd; border-left: 4px solid #ffc107;">
+            <h3 style="color: #856404; margin: 0 0 10px 0;"> 临时成绩状态</h3>
+            <p>当前所有成绩均为 <span class="badge badge-warning">临时成绩</span>，会随着作业批改而实时更新。</p>
+            <p><strong>点击"计算临时成绩"</strong>：更新成绩但不归档，成绩会继续变化。</p>
+            <p><strong>点击"确认归档成绩"</strong>：归档并锁定成绩，成绩将不再变化，学生可查看最终成绩。</p>
+        </div>
+        {% endif %}
+
         <div class="content-section">
-        <form method="POST" action="{{ url_for('teacher_calculate_grades', class_id=class_id) }}">
-            <h2 class="section-title">📝 班级成绩表 ({{ grades_list|length }} 人)</h2>
+        <form method="POST" action="{{ url_for('teacher_calculate_grades', class_id=class_id) }}" id="gradeForm">
+            <h2 class="section-title"> 班级成绩表 ({{ grades_list|length }} 人)</h2>
             
             {% if grades_list %}
             <table>
@@ -73,45 +105,67 @@
                         <th colspan="3">成绩组成</th>
                         <th rowspan="2">教师课末评价<br>(请输入0-100)</th>
                         <th rowspan="2">最终成绩</th>
-                        <th rowspan="2">计算时间</th>
+                        <th rowspan="2">状态</th>
+                        <th rowspan="2">归档时间</th>
                     </tr>
                     <tr>
-                        <th>作业平均<br>(40%)</th>
-                        <th>考试平均<br>(40%)</th>
+                        <th>作业平均<br>(30%)</th>
+                        <th>考试平均<br>(50%)</th>
                         <th>评价分<br>(20%)</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for item in grades_list %}
-                    <tr>
+                    <tr class="{{ 'locked-row' if item.is_finalized else '' }}">
                         <td>{{ item.student.student_no }}</td>
                         <td>{{ item.student.name }}</td>
-                        <td>{{ '%.2f'|format(item.current_homework_avg) }}</td>
-                        <td>{{ '%.2f'|format(item.current_exam_avg) }}</td>
-                        <td>{{ '%.2f'|format(item.grade.teacher_evaluation) if item.grade and item.grade.teacher_evaluation is not none else '-' }}</td>
+                        <td>{{ '%.2f'|format(item.homework_avg) }}</td>
+                        <td>{{ '%.2f'|format(item.exam_avg) }}</td>
+                        <td>{{ '%.2f'|format(item.teacher_evaluation) if item.teacher_evaluation else '-' }}</td>
                         <td>
                             <input type="number" name="teacher_eval_{{ item.student.student_id }}" 
                                    min="0" max="100" step="0.01"
-                                   value="{{ item.grade.teacher_evaluation if item.grade and item.grade.teacher_evaluation is not none else '' }}"
-                                   placeholder="0-100">
+                                   value="{{ item.teacher_evaluation if item.teacher_evaluation else '' }}"
+                                   placeholder="0-100"
+                                   {{ 'disabled' if item.is_finalized else '' }}>
                         </td>
                         <td>
-                            {% if item.grade and item.grade.final_grade is not none %}
-                                <span class="{% if item.grade.final_grade >= 85 %}grade-excellent{% elif item.grade.final_grade < 60 %}grade-fail{% endif %}">
-                                    {{ '%.2f'|format(item.grade.final_grade) }}
+                            {% if item.final_grade is not none %}
+                                <span class="{% if item.final_grade >= 85 %}grade-excellent{% elif item.final_grade < 60 %}grade-fail{% endif %}">
+                                    {{ '%.2f'|format(item.final_grade) }}
                                 </span>
                             {% else %}
                                 -
                             {% endif %}
                         </td>
-                        <td>{{ item.grade.calculated_at.strftime('%Y-%m-%d') if item.grade and item.grade.calculated_at else '-' }}</td>
+                        <td>
+                            {% if item.is_finalized %}
+                                <span class="badge badge-success"> 已归档</span>
+                            {% else %}
+                                <span class="badge badge-warning">临时</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if item.finalized_at %}
+                                {{ item.finalized_at.strftime('%Y-%m-%d %H:%M') }}
+                            {% elif item.grade_record and item.grade_record.calculated_at %}
+                                {{ item.grade_record.calculated_at.strftime('%Y-%m-%d') }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
             
-            <div style="margin-top: 25px; text-align: center;">
-                <button type="submit" class="btn btn-success">💾 计算并发布成绩</button>
+            <div class="action-buttons">
+                <button type="submit" name="finalize" value="false" class="btn btn-primary" onclick="return confirmCalculate()">
+                     计算临时成绩
+                </button>
+                <button type="submit" name="finalize" value="true" class="btn btn-success" onclick="return confirmFinalize()">
+                     确认归档成绩
+                </button>
             </div>
             
             {% else %}
@@ -120,5 +174,15 @@
         </form>
         </div>
     </div>
+
+    <script>
+        function confirmCalculate() {
+            return confirm('确定要计算临时成绩吗？\n\n临时成绩会随着作业批改而继续变化。');
+        }
+
+        function confirmFinalize() {
+            return confirm(' 确定要归档并锁定成绩吗？\n\n归档后：\n1. 成绩将被锁定，不再随作业批改而变化\n2. 学生可以查看最终确定的成绩\n3. 如需修改，需要重新归档\n\n是否继续？');
+        }
+    </script>
 </body>
 </html>

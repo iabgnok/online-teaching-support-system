@@ -34,8 +34,8 @@ class Users(db.Model, UserMixin):
     real_name = db.Column(db.String(50), nullable=False)
     phone = db.Column(db.String(20))
     email = db.Column(db.String(100))
-    role = db.Column(db.String(20), nullable=False)  # 'admin', 'teacher', 'student'
-    status = db.Column(db.SmallInteger, default=1)  # 0=禁用, 1=激活
+    role = db.Column(db.String(20), nullable=False, index=True)  # 'admin', 'teacher', 'student'
+    status = db.Column(db.SmallInteger, default=1, index=True)  # 0=禁用, 1=激活
     created_at = db.Column(db.DateTime(timezone=True), default=func.now())
     updated_at = db.Column(db.DateTime(timezone=True), default=func.now(), onupdate=func.now())
 
@@ -82,7 +82,6 @@ class Users(db.Model, UserMixin):
     admin_profile = db.relationship('Admin', backref='user', uselist=False)
     student_profile = db.relationship('Student', backref='user', uselist=False)
     teacher_profile = db.relationship('Teacher', backref='user', uselist=False)
-    teacher_profile = db.relationship('Teacher', backref='user', uselist=False)
 
 
 class Admin(db.Model):
@@ -90,9 +89,9 @@ class Admin(db.Model):
     __tablename__ = 'Admin'
 
     admin_id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
-    user_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'), unique=True, nullable=False)
+    user_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id', name='FK_Admin_User'), unique=True, nullable=False)
     admin_no = db.Column(db.String(20), unique=True, nullable=False)
-    dept_id = db.Column(db.BigInteger, db.ForeignKey('Department.dept_id'))
+    dept_id = db.Column(db.BigInteger, db.ForeignKey('Department.dept_id', name='FK_Admin_Department'))
     permission_level = db.Column(db.SmallInteger, default=3)  # 1=最高, 2=中级, 3=一般
     created_at = db.Column(db.DateTime(timezone=True), default=func.now())
     updated_at = db.Column(db.DateTime(timezone=True), default=func.now(), onupdate=func.now())
@@ -114,9 +113,9 @@ class Student(db.Model):
     __tablename__ = 'Student'
 
     student_id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
-    user_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'), unique=True, nullable=False)
-    student_no = db.Column(db.String(10), unique=True, nullable=False)
-    dept_id = db.Column(db.BigInteger, db.ForeignKey('Department.dept_id'))
+    user_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id', name='FK_Student_User'), unique=True, nullable=False)
+    student_no = db.Column(db.CHAR(10), unique=True, nullable=False)
+    dept_id = db.Column(db.BigInteger, db.ForeignKey('Department.dept_id', name='FK_Student_Department'))
     major = db.Column(db.String(100))
     created_at = db.Column(db.DateTime(timezone=True), default=func.now())
     updated_at = db.Column(db.DateTime(timezone=True), default=func.now(), onupdate=func.now())
@@ -137,10 +136,10 @@ class Teacher(db.Model):
     __tablename__ = 'Teacher'
 
     teacher_id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
-    user_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'), unique=True, nullable=False)
+    user_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id', name='FK_Teacher_User'), unique=True, nullable=False)
     teacher_no = db.Column(db.String(20), unique=True, nullable=False)
     title = db.Column(db.String(50))
-    dept_id = db.Column(db.BigInteger, db.ForeignKey('Department.dept_id'))
+    dept_id = db.Column(db.BigInteger, db.ForeignKey('Department.dept_id', name='FK_Teacher_Department'))
     created_at = db.Column(db.DateTime(timezone=True), default=func.now())
     updated_at = db.Column(db.DateTime(timezone=True), default=func.now(), onupdate=func.now())
 
@@ -155,7 +154,6 @@ class Teacher(db.Model):
     def name(self):
         """获取教师姓名"""
         return self.user.real_name if self.user else None
-        return self.user.real_name if self.user else None
  
 # -----------------------------------------------------------
 # 2. 教学基础模块
@@ -169,7 +167,6 @@ class Course(db.Model):
     course_id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
     course_code = db.Column(db.String(50), unique=True, nullable=False)
     course_name = db.Column(db.String(100), nullable=False)
-    # DECIMAL(3,1) 对应 Numeric(3, 1)
     credit = db.Column(db.Numeric(3, 1))
     hours = db.Column(db.Integer)
     course_type = db.Column(db.String(50))
@@ -187,13 +184,13 @@ class TeachingClass(db.Model):
     __tablename__ = 'TeachingClass'
 
     class_id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
-    course_id = db.Column(db.BigInteger, db.ForeignKey('Course.course_id'), nullable=False)
+    course_id = db.Column(db.BigInteger, db.ForeignKey('Course.course_id', name='FK_TeachingClass_Course'), nullable=False)
     class_name = db.Column(db.String(100), nullable=False)
-    semester = db.Column(db.String(20), nullable=False)
+    semester = db.Column(db.String(20), nullable=False, index=True)
     class_time = db.Column(db.String(200))
     classroom = db.Column(db.String(100))
     capacity = db.Column(db.Integer)
-    status = db.Column(db.SmallInteger, default=1)  # 0=禁用, 1=激活
+    status = db.Column(db.SmallInteger, default=1, index=True)  # 0=禁用, 1=激活
     created_at = db.Column(db.DateTime(timezone=True), default=func.now())
     updated_at = db.Column(db.DateTime(timezone=True), default=func.now(), onupdate=func.now())
 
@@ -210,8 +207,8 @@ class StudentClass(db.Model):
     __tablename__ = 'StudentClass'
 
     id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
-    student_id = db.Column(db.BigInteger, db.ForeignKey('Student.student_id'), nullable=False)
-    class_id = db.Column(db.BigInteger, db.ForeignKey('TeachingClass.class_id'), nullable=False)
+    student_id = db.Column(db.BigInteger, db.ForeignKey('Student.student_id', name='FK_StudentClass_Student'), nullable=False)
+    class_id = db.Column(db.BigInteger, db.ForeignKey('TeachingClass.class_id', name='FK_StudentClass_Class'), nullable=False)
     enroll_time = db.Column(db.DateTime(timezone=True), default=func.now())
     status = db.Column(db.SmallInteger, default=1)  # 0=退课, 1=正常
 
@@ -225,8 +222,8 @@ class TeacherClass(db.Model):
     __tablename__ = 'TeacherClass'
 
     id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
-    teacher_id = db.Column(db.BigInteger, db.ForeignKey('Teacher.teacher_id'), nullable=False)
-    class_id = db.Column(db.BigInteger, db.ForeignKey('TeachingClass.class_id'), nullable=False)
+    teacher_id = db.Column(db.BigInteger, db.ForeignKey('Teacher.teacher_id', name='FK_TeacherClass_Teacher'), nullable=False)
+    class_id = db.Column(db.BigInteger, db.ForeignKey('TeachingClass.class_id', name='FK_TeacherClass_Class'), nullable=False)
     role = db.Column(db.String(20), default='main')  # 'main'=主讲, 'assistant'=助教
     assign_time = db.Column(db.DateTime(timezone=True), default=func.now())
 
@@ -241,8 +238,8 @@ class Material(db.Model):
     __tablename__ = 'Material'
 
     material_id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
-    class_id = db.Column(db.BigInteger, db.ForeignKey('TeachingClass.class_id'), nullable=False)
-    teacher_id = db.Column(db.BigInteger, db.ForeignKey('Teacher.teacher_id'), nullable=False)
+    class_id = db.Column(db.BigInteger, db.ForeignKey('TeachingClass.class_id', name='FK_Material_Class'), nullable=False)
+    teacher_id = db.Column(db.BigInteger, db.ForeignKey('Teacher.teacher_id', name='FK_Material_Teacher'), nullable=False)
     title = db.Column(db.String(200), nullable=False)
     description = db.Column(db.Text)
     file_name = db.Column(db.String(255))
@@ -260,17 +257,17 @@ class Assignment(db.Model):
     __tablename__ = 'Assignment'
 
     assignment_id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
-    class_id = db.Column(db.BigInteger, db.ForeignKey('TeachingClass.class_id'), nullable=False)
-    teacher_id = db.Column(db.BigInteger, db.ForeignKey('Teacher.teacher_id'), nullable=False)
+    class_id = db.Column(db.BigInteger, db.ForeignKey('TeachingClass.class_id', name='FK_Assignment_Class'), nullable=False)
+    teacher_id = db.Column(db.BigInteger, db.ForeignKey('Teacher.teacher_id', name='FK_Assignment_Teacher'), nullable=False)
     type = db.Column(db.String(20), nullable=False)  # 'homework'=作业, 'exam'=考试
     title = db.Column(db.String(200), nullable=False)
     description = db.Column(db.Text)
     total_score = db.Column(db.Numeric(5, 2), nullable=False, default=100.00)
-    deadline = db.Column(db.DateTime(timezone=True), nullable=False)
+    deadline = db.Column(db.DateTime(timezone=True), nullable=False, index=True)
     start_time = db.Column(db.DateTime(timezone=True))  # 考试特有
     duration = db.Column(db.Integer)  # 考试时长(分钟)
     publish_time = db.Column(db.DateTime(timezone=True), default=func.now())
-    status = db.Column(db.SmallInteger, default=1)  # 0=关闭, 1=开放
+    status = db.Column(db.SmallInteger, default=1, index=True)  # 0=关闭, 1=开放
 
     # 关系：Assignment -> Submission (一对多)
     submissions = db.relationship('Submission', backref='assignment', lazy='dynamic')
@@ -281,17 +278,17 @@ class Submission(db.Model):
     __tablename__ = 'Submission'
 
     submission_id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
-    assignment_id = db.Column(db.BigInteger, db.ForeignKey('Assignment.assignment_id'), nullable=False)
-    student_id = db.Column(db.BigInteger, db.ForeignKey('Student.student_id'), nullable=False)
+    assignment_id = db.Column(db.BigInteger, db.ForeignKey('Assignment.assignment_id', name='FK_Submission_Assignment'), nullable=False)
+    student_id = db.Column(db.BigInteger, db.ForeignKey('Student.student_id', name='FK_Submission_Student'), nullable=False)
     content = db.Column(db.Text)
     file_name = db.Column(db.String(255))
     file_path = db.Column(db.String(500))
     submit_time = db.Column(db.DateTime(timezone=True), default=func.now())
     score = db.Column(db.Numeric(5, 2))
     feedback = db.Column(db.Text)
-    graded_by = db.Column(db.BigInteger, db.ForeignKey('Teacher.teacher_id'))
+    graded_by = db.Column(db.BigInteger, db.ForeignKey('Teacher.teacher_id', name='FK_Submission_Grader'))
     graded_time = db.Column(db.DateTime(timezone=True))
-    status = db.Column(db.String(20), default='submitted')  # 'submitted'=已提交, 'graded'=已批改
+    status = db.Column(db.String(20), default='submitted', index=True)  # 'submitted'=已提交, 'graded'=已批改
 
     __table_args__ = (
         db.UniqueConstraint('assignment_id', 'student_id', name='UK_Submission_Assignment_Student'),
@@ -300,20 +297,42 @@ class Submission(db.Model):
 # ==================== 成绩管理模块 ====================
 
 class Grade(db.Model):
-    """成绩表"""
+    """成绩表：存储最终归档的成绩"""
     __tablename__ = 'Grade'
 
     grade_id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
-    student_id = db.Column(db.BigInteger, db.ForeignKey('Student.student_id'), nullable=False)
-    class_id = db.Column(db.BigInteger, db.ForeignKey('TeachingClass.class_id'), nullable=False)
-    homework_avg = db.Column(db.Numeric(5, 2))
-    exam_avg = db.Column(db.Numeric(5, 2))
-    teacher_evaluation = db.Column(db.Numeric(5, 2))
-    final_grade = db.Column(db.Numeric(5, 2))
-    calculated_by = db.Column(db.BigInteger, db.ForeignKey('Teacher.teacher_id'))
+    student_id = db.Column(db.BigInteger, db.ForeignKey('Student.student_id', name='FK_Grade_Student'), nullable=False)
+    class_id = db.Column(db.BigInteger, db.ForeignKey('TeachingClass.class_id', name='FK_Grade_Class'), nullable=False)
+    
+    # 归档的最终成绩（教师确认后不再变动）
+    homework_avg = db.Column(db.Numeric(5, 2), comment='最终作业平均分（归档值）')
+    exam_avg = db.Column(db.Numeric(5, 2), comment='最终考试平均分（归档值）')
+    teacher_evaluation = db.Column(db.Numeric(5, 2), comment='最终教师评价分（归档值）')
+    final_grade = db.Column(db.Numeric(5, 2), comment='最终总评成绩（归档值）')
+    
+    # 成绩归档状态
+    is_finalized = db.Column(db.Boolean, default=False, nullable=False, index=True, comment='是否已确定归档')
+    finalized_at = db.Column(db.DateTime(timezone=True), comment='成绩确定时间')
+    calculation_formula = db.Column(db.String(200), comment='成绩计算公式，如: hw*0.3+exam*0.5+eval*0.2')
+    
+    # 审计字段
+    calculated_by = db.Column(db.BigInteger, db.ForeignKey('Teacher.teacher_id', name='FK_Grade_Calculator'))
     calculated_at = db.Column(db.DateTime(timezone=True))
     remarks = db.Column(db.Text)
 
     __table_args__ = (
         db.UniqueConstraint('student_id', 'class_id', name='UK_Grade_Student_Class'),
     )
+    
+    def is_locked(self):
+        """成绩是否已锁定"""
+        return self.is_finalized
+    
+    def finalize(self, teacher_id, formula='hw*0.3+exam*0.5+eval*0.2'):
+        """归档并锁定成绩"""
+        from datetime import datetime
+        self.is_finalized = True
+        self.finalized_at = datetime.now()
+        self.calculated_by = teacher_id
+        self.calculated_at = datetime.now()
+        self.calculation_formula = formula

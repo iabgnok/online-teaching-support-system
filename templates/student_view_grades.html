@@ -6,7 +6,7 @@
     <title>{{ title }} - 在线教学支持系统</title>
     {{ unified_styles() }}
     <style>
-        .grade-summary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 10px; margin: 20px 0; text-align: center; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        .grade-summary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 10px; margin: 20px 0; text-align: center; box-shadow: 0 4px 10px rgba(0,0,0,0.1); position: relative; }
         .grade-number { font-size: 4em; font-weight: bold; margin: 20px 0; }
         .grade-breakdown { display: flex; justify-content: space-around; margin-top: 20px; flex-wrap: wrap; gap: 20px; }
         .breakdown-item { text-align: center; min-width: 150px; }
@@ -14,9 +14,12 @@
         .breakdown-label { font-size: 0.9em; opacity: 0.9; margin-top: 5px; }
         .score-excellent { color: #28a745; font-weight: bold; }
         .score-good { color: #007bff; font-weight: bold; }
-        .score-pass { color: #ffc107; font-weight: bold; }
         .score-fail { color: #dc3545; font-weight: bold; }
         .formula-box { background: #e7f3ff; border-left: 4px solid #3498db; padding: 15px; margin: 20px 0; border-radius: 5px; }
+        .badge { padding: 6px 12px; border-radius: 12px; font-size: 0.9em; font-weight: 600; position: absolute; top: 20px; right: 20px; }
+        .badge-success { background: #d4edda; color: #155724; }
+        .badge-warning { background: #fff3cd; color: #856404; }
+        .status-info { background: #d1ecf1; border-left: 4px solid #0c5460; padding: 15px; margin: 20px 0; border-radius: 5px; color: #0c5460; }
     </style>
 </head>
 <body>
@@ -32,18 +35,25 @@
             <p><strong>学分：</strong>{{ course.credit }}</p>
         </div>
 
-        {% if grade %}
+        {% if grade_display %}
         <div class="grade-summary">
-            <h2 style="margin-top: 0;">📊 最终成绩</h2>
-            <div class="grade-number">{{ '%.1f'|format(grade.final_grade) }}</div>
+            <!-- 成绩状态徽章 -->
+            {% if grade_display.is_finalized %}
+                <span class="badge badge-success">✓ 最终成绩</span>
+            {% else %}
+                <span class="badge badge-warning">临时成绩</span>
+            {% endif %}
+            
+            <h2 style="margin-top: 0;">📊 {{ '最终成绩' if grade_display.is_finalized else '当前成绩' }}</h2>
+            <div class="grade-number">{{ '%.1f'|format(grade_display.final_grade) }}</div>
             <div style="font-size: 1.2em;">
-                {% if grade.final_grade >= 90 %}
+                {% if grade_display.final_grade >= 90 %}
                     优秀 (A)
-                {% elif grade.final_grade >= 80 %}
+                {% elif grade_display.final_grade >= 80 %}
                     良好 (B)
-                {% elif grade.final_grade >= 70 %}
+                {% elif grade_display.final_grade >= 70 %}
                     中等 (C)
-                {% elif grade.final_grade >= 60 %}
+                {% elif grade_display.final_grade >= 60 %}
                     及格 (D)
                 {% else %}
                     不及格 (F)
@@ -52,24 +62,38 @@
             
             <div class="grade-breakdown">
                 <div class="breakdown-item">
-                    <div class="breakdown-value">{{ '%.1f'|format(grade.homework_avg|float) if grade.homework_avg is not none else '-' }}</div>
+                    <div class="breakdown-value">{{ '%.1f'|format(grade_display.homework_avg) }}</div>
                     <div class="breakdown-label">作业平均分</div>
                 </div>
                 <div class="breakdown-item">
-                    <div class="breakdown-value">{{ '%.1f'|format(grade.exam_avg|float) if grade.exam_avg is not none else '-' }}</div>
+                    <div class="breakdown-value">{{ '%.1f'|format(grade_display.exam_avg) }}</div>
                     <div class="breakdown-label">考试平均分</div>
                 </div>
                 <div class="breakdown-item">
-                    <div class="breakdown-value">{{ '%.1f'|format(grade.teacher_evaluation|float) if grade.teacher_evaluation is not none else '-' }}</div>
+                    <div class="breakdown-value">{{ '%.1f'|format(grade_display.teacher_evaluation) }}</div>
                     <div class="breakdown-label">教师评价</div>
                 </div>
             </div>
         </div>
 
+        {% if grade_display.is_finalized %}
+        <div class="status-info">
+            <strong>✓ 成绩已归档</strong><br>
+            此成绩为教师确认的最终成绩，已于 <strong>{{ grade_display.finalized_at.strftime('%Y年%m月%d日 %H:%M') }}</strong> 归档。<br>
+            归档后的成绩不会再因后续作业批改而变化。
+        </div>
+        {% else %}
+        <div class="status-info" style="background: #fff3cd; border-left-color: #ffc107; color: #856404;">
+            <strong>⚠️ 临时成绩</strong><br>
+            此成绩为当前计算的临时成绩，会随着作业批改而更新。<br>
+            教师确认归档后，您将看到最终确定的成绩。
+        </div>
+        {% endif %}
+
         <div class="formula-box">
             <strong>📐 成绩计算公式：</strong><br>
-            最终成绩 = 作业平均分 × 40% + 考试平均分 × 40% + 教师评价 × 20%<br>
-            <small style="color: #666;">= {{ '%.1f'|format(grade.homework_avg|float) if grade.homework_avg is not none else '0.0' }} × 0.4 + {{ '%.1f'|format(grade.exam_avg|float) if grade.exam_avg is not none else '0.0' }} × 0.4 + {{ '%.1f'|format(grade.teacher_evaluation|float) if grade.teacher_evaluation is not none else '0.0' }} × 0.2 = {{ '%.1f'|format(grade.final_grade|float) if grade.final_grade is not none else '0.0' }}</small>
+            最终成绩 = 作业平均分 × 30% + 考试平均分 × 50% + 教师评价 × 20%<br>
+            <small style="color: #666;">= {{ '%.1f'|format(grade_display.homework_avg) }} × 0.3 + {{ '%.1f'|format(grade_display.exam_avg) }} × 0.5 + {{ '%.1f'|format(grade_display.teacher_evaluation) }} × 0.2 = {{ '%.1f'|format(grade_display.final_grade) }}</small>
         </div>
         {% else %}
         <div class="grade-summary">
@@ -116,10 +140,8 @@
                         {% endfor %}
                     </tbody>
                 </table>
-                {% if homework_submissions|length > 0 and grade and grade.homework_avg is not none %}
-                <p style="margin-top: 15px; text-align: right;"><strong>平均分：{{ '%.1f'|format(grade.homework_avg|float) }}</strong></p>
-                {% elif homework_submissions|length > 0 %}
-                <p style="margin-top: 15px; text-align: right; color: #999;"><strong>平均分：暂未计算</strong></p>
+                {% if homework_submissions|length > 0 and grade_display and grade_display.homework_avg %}
+                <p style="margin-top: 15px; text-align: right;"><strong>平均分：{{ '%.1f'|format(grade_display.homework_avg) }}</strong></p>
                 {% endif %}
                 {% else %}
                 <div class="empty-message">暂无作业成绩</div>
@@ -164,10 +186,8 @@
                         {% endfor %}
                     </tbody>
                 </table>
-                {% if exam_submissions|length > 0 and grade and grade.exam_avg is not none %}
-                <p style="margin-top: 15px; text-align: right;"><strong>平均分：{{ '%.1f'|format(grade.exam_avg|float) }}</strong></p>
-                {% elif exam_submissions|length > 0 %}
-                <p style="margin-top: 15px; text-align: right; color: #999;"><strong>平均分：暂未计算</strong></p>
+                {% if exam_submissions|length > 0 and grade_display and grade_display.exam_avg %}
+                <p style="margin-top: 15px; text-align: right;"><strong>平均分：{{ '%.1f'|format(grade_display.exam_avg) }}</strong></p>
                 {% endif %}
                 {% else %}
                 <div class="empty-message">暂无考试成绩</div>

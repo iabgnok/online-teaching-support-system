@@ -57,6 +57,121 @@ def get_or_create_department(dept_name):
     return new_dept.dept_id 
 
 
+# ==================== 成绩计算辅助函数 ====================
+
+def calculate_student_grade(student_id, class_id):
+    """
+    实时计算学生成绩（不写入数据库）
+    返回: {
+        'homework_avg': float,
+        'exam_avg': float, 
+        'current_score': float,  # 按默认公式计算的总分
+        'has_homework': bool,
+        'has_exam': bool
+    }
+    """
+    # 获取该班级的所有作业和考试
+    all_homeworks = Assignment.query.filter_by(class_id=class_id, type='homework', status=1).all()
+    all_exams = Assignment.query.filter_by(class_id=class_id, type='exam', status=1).all()
+    
+    # 计算作业平均分
+    homework_avg = 0.0
+    if all_homeworks:
+        homework_scores = []
+        for hw in all_homeworks:
+            submission = Submission.query.filter_by(
+                assignment_id=hw.assignment_id,
+                student_id=student_id
+            ).first()
+            
+            if submission and submission.status == 'graded' and submission.score is not None:
+                homework_scores.append(float(submission.score))
+            else:
+                homework_scores.append(0.0)
+        
+        homework_avg = sum(homework_scores) / len(homework_scores) if homework_scores else 0.0
+    
+    # 计算考试平均分
+    exam_avg = 0.0
+    if all_exams:
+        exam_scores = []
+        for exam in all_exams:
+            submission = Submission.query.filter_by(
+                assignment_id=exam.assignment_id,
+                student_id=student_id
+            ).first()
+            
+            if submission and submission.status == 'graded' and submission.score is not None:
+                exam_scores.append(float(submission.score))
+            else:
+                exam_scores.append(0.0)
+        
+        exam_avg = sum(exam_scores) / len(exam_scores) if exam_scores else 0.0
+    
+    # 按默认公式计算总分（作业30% + 考试50% + 教师评价20%）
+    # 这里教师评价默认为0，实际计算时会从表单获取
+    current_score = homework_avg * 0.3 + exam_avg * 0.5
+    
+    return {
+        'homework_avg': round(homework_avg, 2),
+        'exam_avg': round(exam_avg, 2),
+        'current_score': round(current_score, 2),
+        'has_homework': len(all_homeworks) > 0,
+        'has_exam': len(all_exams) > 0
+    }
+
+
+def get_student_grade_display(student_id, class_id):
+    """
+    获取学生成绩显示（优先显示已归档成绩，否则实时计算）
+    返回: {
+        'homework_avg': float,
+        'exam_avg': float,
+        'teacher_evaluation': float,
+        'final_grade': float,
+        'is_finalized': bool,
+        'finalized_at': datetime or None,
+        'calculated_by': Teacher or None,
+        'remarks': str or None
+    }
+    """
+    # 查询数据库中的成绩记录
+    grade = Grade.query.filter_by(student_id=student_id, class_id=class_id).first()
+    
+    if grade and grade.is_finalized:
+        # 返回已归档的成绩
+        return {
+            'homework_avg': float(grade.homework_avg) if grade.homework_avg else 0.0,
+            'exam_avg': float(grade.exam_avg) if grade.exam_avg else 0.0,
+            'teacher_evaluation': float(grade.teacher_evaluation) if grade.teacher_evaluation else 0.0,
+            'final_grade': float(grade.final_grade) if grade.final_grade else 0.0,
+            'is_finalized': True,
+            'finalized_at': grade.finalized_at,
+            'calculated_by': grade.calculator if grade.calculated_by else None,
+            'remarks': grade.remarks,
+            'calculation_formula': grade.calculation_formula
+        }
+    else:
+        # 实时计算临时成绩
+        calc_result = calculate_student_grade(student_id, class_id)
+        teacher_eval = float(grade.teacher_evaluation) if (grade and grade.teacher_evaluation) else 0.0
+        
+        # 计算总分
+        final = calc_result['homework_avg'] * 0.3 + calc_result['exam_avg'] * 0.5 + teacher_eval * 0.2
+        
+        return {
+            'homework_avg': calc_result['homework_avg'],
+            'exam_avg': calc_result['exam_avg'],
+            'teacher_evaluation': teacher_eval,
+            'final_grade': round(final, 2),
+            'is_finalized': False,
+            'finalized_at': None,
+            'calculated_by': None,
+            'remarks': grade.remarks if grade else None,
+            'calculation_formula': None
+        }
+
+
 # ==================== Flask-Login 配置 ====================
 
 @login_manager.user_loader
@@ -634,6 +749,199 @@ def admin_permissions():
                          user=current_user,
                          admins=admins,
                          title='权限管理')
+
+
+@app.route('/admin/grades', methods=['GET'])
+@login_required
+@admin_permission_required(2)
+def admin_grades():
+    """管理员：查看所有成绩（需要级别2权限）"""
+    # 获取筛选参数
+    semester = request.args.get('semester', '')
+    class_id = request.args.get('class_id', type=int)
+    status = request.args.get('status', '')  # 成绩状态：finalized/temp/all
+    search = request.args.get('search', '').strip()  # 学生搜索
+    teacher_id = request.args.get('teacher_id', type=int)  # 教师筛选
+    
+    # 基础查询 - 直接关联到 Users 表获取教师姓名
+    query = db.session.query(
+        Grade, Student, TeachingClass, Course, Teacher, Users
+    ).join(
+        Student, Grade.student_id == Student.student_id
+    ).join(
+        TeachingClass, Grade.class_id == TeachingClass.class_id
+    ).join(
+        Course, TeachingClass.course_id == Course.course_id
+    ).outerjoin(
+        TeacherClass, db.and_(
+            TeachingClass.class_id == TeacherClass.class_id,
+            TeacherClass.role == 'main'
+        )
+    ).outerjoin(
+        Teacher, TeacherClass.teacher_id == Teacher.teacher_id
+    ).outerjoin(
+        Users, Teacher.user_id == Users.user_id
+    )
+    
+    # 应用筛选
+    if semester:
+        query = query.filter(TeachingClass.semester == semester)
+    if class_id:
+        query = query.filter(Grade.class_id == class_id)
+    if status == 'finalized':
+        query = query.filter(Grade.is_finalized == True)
+    elif status == 'temp':
+        query = query.filter(Grade.is_finalized == False)
+    if search:
+        query = query.filter(
+            db.or_(
+                Student.student_no.like(f'%{search}%'),
+                Student.name.like(f'%{search}%')
+            )
+        )
+    if teacher_id:
+        query = query.filter(Teacher.teacher_id == teacher_id)
+    
+    # 排序
+    grades_data = query.order_by(
+        TeachingClass.semester.desc(),
+        Course.course_name,
+        Student.student_no
+    ).all()
+    
+    # 获取所有学期列表（用于筛选）
+    semesters = db.session.query(
+        TeachingClass.semester
+    ).distinct().order_by(
+        TeachingClass.semester.desc()
+    ).all()
+    semesters = [s[0] for s in semesters]
+    
+    # 获取所有教学班列表（用于筛选）
+    if semester:
+        classes = db.session.query(
+            TeachingClass, Course
+        ).join(
+            Course
+        ).filter(
+            TeachingClass.semester == semester
+        ).order_by(
+            Course.course_name
+        ).all()
+    else:
+        classes = []
+    
+    # 获取所有教师列表（用于筛选） - 只获取主讲教师
+    teachers = db.session.query(
+        Teacher
+    ).join(
+        TeacherClass, Teacher.teacher_id == TeacherClass.teacher_id
+    ).filter(
+        TeacherClass.role == 'main'
+    ).distinct().order_by(
+        Teacher.teacher_no
+    ).all()
+    
+    # 统计信息
+    total_grades = len(grades_data)
+    finalized_count = sum(1 for item in grades_data if item[0].is_finalized)
+    temp_count = total_grades - finalized_count
+    
+    return render_template('admin_grades.html',
+                         user=current_user,
+                         grades_data=grades_data,
+                         semesters=semesters,
+                         classes=classes,
+                         teachers=teachers,
+                         selected_semester=semester,
+                         selected_class_id=class_id,
+                         selected_status=status,
+                         selected_search=search,
+                         selected_teacher_id=teacher_id,
+                         total_grades=total_grades,
+                         finalized_count=finalized_count,
+                         temp_count=temp_count,
+                         title='成绩管理')
+
+
+@app.route('/admin/grade/unlock/<int:grade_id>', methods=['POST'])
+@login_required
+@admin_permission_required(1)
+def admin_unlock_grade(grade_id):
+    """管理员：解锁已归档的成绩（需要最高权限）"""
+    grade = db.session.get(Grade, grade_id)
+    
+    if not grade:
+        flash('❌ 成绩记录不存在', 'danger')
+        return redirect(url_for('admin_grades'))
+    
+    if not grade.is_finalized:
+        flash('⚠️ 该成绩尚未归档，无需解锁', 'warning')
+        return redirect(url_for('admin_grades'))
+    
+    try:
+        # 解锁成绩
+        grade.is_finalized = False
+        grade.finalized_at = None
+        # 保留 calculation_formula 以便重新归档时参考
+        
+        db.session.commit()
+        
+        # 获取学生和班级信息用于日志
+        student = grade.student
+        teaching_class = grade.teaching_class
+        
+        flash(f'✅ 已解锁成绩：{student.name} - {teaching_class.course.course_name}', 'success')
+        app.logger.info(f'管理员 {current_user.username} 解锁了成绩 grade_id={grade_id}')
+        
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f"解锁成绩失败: {e}")
+        flash(f'❌ 解锁失败：{e}', 'danger')
+    
+    return redirect(url_for('admin_grades'))
+
+
+@app.route('/admin/class/<int:class_id>/grades/unlock_all', methods=['POST'])
+@login_required
+@admin_permission_required(1)
+def admin_unlock_class_grades(class_id):
+    """管理员：解锁整个班级的所有归档成绩（需要最高权限）"""
+    teaching_class = db.session.get(TeachingClass, class_id)
+    
+    if not teaching_class:
+        flash('❌ 教学班不存在', 'danger')
+        return redirect(url_for('admin_grades'))
+    
+    try:
+        # 查找该班级所有已归档的成绩
+        finalized_grades = Grade.query.filter_by(
+            class_id=class_id,
+            is_finalized=True
+        ).all()
+        
+        if not finalized_grades:
+            flash('⚠️ 该班级没有已归档的成绩', 'warning')
+            return redirect(url_for('admin_grades'))
+        
+        # 批量解锁
+        count = 0
+        for grade in finalized_grades:
+            grade.is_finalized = False
+            grade.finalized_at = None
+            count += 1
+        
+        db.session.commit()
+        
+        flash(f'✅ 已解锁 {count} 条成绩记录：{teaching_class.course.course_name} - {teaching_class.class_name}', 'success')
+        app.logger.info(f'管理员 {current_user.username} 批量解锁了班级 {class_id} 的 {count} 条成绩')
+        
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f"批量解锁成绩失败: {e}")
+        flash(f'❌ 批量解锁失败：{e}', 'danger')
+    
+    return redirect(url_for('admin_grades'))
 
 
 @app.route('/admin/import_departments', methods=['GET', 'POST'])
@@ -1436,8 +1744,9 @@ def student_view_grades(class_id):
     teaching_class = enrollment.teaching_class
     course = teaching_class.course
     
-    # 获取成绩记录
-    grade = Grade.query.filter_by(student_id=student.student_id, class_id=class_id).first()
+    # 使用辅助函数获取成绩（优先显示归档成绩）
+    grade_display = get_student_grade_display(student.student_id, class_id)
+    grade_record = Grade.query.filter_by(student_id=student.student_id, class_id=class_id).first()
     
     # 获取所有作业提交及成绩
     homework_submissions = db.session.query(Submission, Assignment).join(Assignment).filter(
@@ -1458,7 +1767,8 @@ def student_view_grades(class_id):
                          student=student,
                          teaching_class=teaching_class,
                          course=course,
-                         grade=grade,
+                         grade_record=grade_record,
+                         grade_display=grade_display,
                          homework_submissions=homework_submissions,
                          exam_submissions=exam_submissions,
                          title=f'{course.course_name} - 成绩详情')
@@ -1783,7 +2093,7 @@ def teacher_grade_submission(submission_id):
 @login_required
 @role_required('teacher')
 def teacher_calculate_grades(class_id):
-    """教师计算并发布成绩"""
+    """教师计算成绩（临时成绩，未归档）"""
     teacher = current_user.teacher_profile
     
     # 验证权限
@@ -1791,6 +2101,9 @@ def teacher_calculate_grades(class_id):
     if not tc:
         flash('您没有权限操作该班级', 'danger')
         return redirect(url_for('teacher_class_detail', class_id=class_id))
+    
+    # 检查是否要归档成绩
+    finalize = request.form.get('finalize') == 'true'
     
     try:
         # 获取该班级的所有学生
@@ -1801,61 +2114,39 @@ def teacher_calculate_grades(class_id):
         all_exams = Assignment.query.filter_by(class_id=class_id, type='exam', status=1).all()
         
         success_count = 0
-        error_count = 0
+        finalized_count = 0
+        formula = 'hw*0.3+exam*0.5+eval*0.2'  # 成绩计算公式
         
         for enrollment in enrollments:
             student_id = enrollment.student_id
             
-            # 计算作业平均分（所有作业，未提交记0分）
-            if all_homeworks:
-                homework_scores = []
-                for hw in all_homeworks:
-                    submission = Submission.query.filter_by(
-                        assignment_id=hw.assignment_id,
-                        student_id=student_id
-                    ).first()
-                    
-                    if submission and submission.status == 'graded' and submission.score is not None:
-                        homework_scores.append(float(submission.score))
-                    else:
-                        # 未提交或未批改，记0分
-                        homework_scores.append(0.0)
-                
-                homework_avg = sum(homework_scores) / len(homework_scores) if homework_scores else 0
-            else:
-                homework_avg = 0
-            
-            # 计算考试平均分（所有考试，未提交记0分）
-            if all_exams:
-                exam_scores = []
-                for exam in all_exams:
-                    submission = Submission.query.filter_by(
-                        assignment_id=exam.assignment_id,
-                        student_id=student_id
-                    ).first()
-                    
-                    if submission and submission.status == 'graded' and submission.score is not None:
-                        exam_scores.append(float(submission.score))
-                    else:
-                        # 未提交或未批改，记0分
-                        exam_scores.append(0.0)
-                
-                exam_avg = sum(exam_scores) / len(exam_scores) if exam_scores else 0
-            else:
-                exam_avg = 0
+            # 使用辅助函数计算成绩
+            calc_result = calculate_student_grade(student_id, class_id)
+            homework_avg = calc_result['homework_avg']
+            exam_avg = calc_result['exam_avg']
             
             # 获取教师评价分（从表单中获取，处理空值）
             teacher_eval_key = f'teacher_eval_{student_id}'
             teacher_eval_str = request.form.get(teacher_eval_key, '').strip()
-            teacher_evaluation = float(teacher_eval_str) if teacher_eval_str else 0.0
-            
-            # 计算最终成绩：作业40% + 考试40% + 教师评价20%
-            final_grade = homework_avg * 0.4 + exam_avg * 0.4 + teacher_evaluation * 0.2
             
             # 查找或创建成绩记录
             grade = Grade.query.filter_by(student_id=student_id, class_id=class_id).first()
             
             if grade:
+                # 检查是否已归档且未请求重新归档
+                if grade.is_finalized and not finalize:
+                    continue  # 跳过已归档的成绩
+                
+                # 如果表单中没有提供评价分（例如禁用的输入框），则保留原值
+                if teacher_eval_str:
+                    teacher_evaluation = float(teacher_eval_str)
+                else:
+                    # 保留原有评价分，如果没有则为0
+                    teacher_evaluation = float(grade.teacher_evaluation) if grade.teacher_evaluation else 0.0
+                
+                # 计算最终成绩：作业30% + 考试50% + 教师评价20%
+                final_grade = homework_avg * 0.3 + exam_avg * 0.5 + teacher_evaluation * 0.2
+                
                 # 更新现有记录
                 grade.homework_avg = homework_avg
                 grade.exam_avg = exam_avg
@@ -1863,8 +2154,16 @@ def teacher_calculate_grades(class_id):
                 grade.final_grade = final_grade
                 grade.calculated_by = teacher.teacher_id
                 grade.calculated_at = db.func.now()
+                
+                # 如果需要归档
+                if finalize:
+                    grade.finalize(teacher.teacher_id, formula)
+                    finalized_count += 1
             else:
-                # 创建新记录
+                # 创建新记录 - 新学生必须输入评价分
+                teacher_evaluation = float(teacher_eval_str) if teacher_eval_str else 0.0
+                final_grade = homework_avg * 0.3 + exam_avg * 0.5 + teacher_evaluation * 0.2
+                
                 max_id = db.session.query(db.func.max(Grade.grade_id)).scalar()
                 new_id = (max_id or 0) + 1
                 
@@ -1879,17 +2178,27 @@ def teacher_calculate_grades(class_id):
                     calculated_by=teacher.teacher_id,
                     calculated_at=db.func.now()
                 )
+                
+                # 如果需要归档
+                if finalize:
+                    grade.finalize(teacher.teacher_id, formula)
+                    finalized_count += 1
+                    
                 db.session.add(grade)
             
             success_count += 1
         
         db.session.commit()
-        flash(f'✅ 成绩计算成功！已为 {success_count} 名学生计算成绩。', 'success')
+        
+        if finalize:
+            flash(f'✅ 成绩已归档！共归档 {finalized_count} 名学生的成绩，成绩已锁定。', 'success')
+        else:
+            flash(f'✅ 成绩计算成功！已为 {success_count} 名学生计算临时成绩。', 'success')
         
     except Exception as e:
         db.session.rollback()
         app.logger.error(f"计算成绩失败: {e}")
-        flash(f'❌ 计算成绩失败：{e}', 'danger')
+        flash(f'❌ 操作失败：{e}', 'danger')
     
     return redirect(url_for('teacher_class_grades', class_id=class_id))
 
@@ -1910,59 +2219,36 @@ def teacher_class_grades(class_id):
     teaching_class = tc.teaching_class
     course = teaching_class.course
     
-    # 获取该班级的所有作业和考试
-    all_homeworks = Assignment.query.filter_by(class_id=class_id, type='homework', status=1).all()
-    all_exams = Assignment.query.filter_by(class_id=class_id, type='exam', status=1).all()
-    
     # 获取所有学生和成绩
     enrollments = StudentClass.query.filter_by(class_id=class_id).all()
     
     grades_list = []
+    has_finalized = False  # 是否有已归档的成绩
+    all_finalized = True   # 是否所有成绩都已归档
+    
     for enrollment in enrollments:
         student = enrollment.student
-        grade = Grade.query.filter_by(student_id=student.student_id, class_id=class_id).first()
         
-        # 实时计算作业平均分（用于显示）
-        if all_homeworks:
-            homework_scores = []
-            for hw in all_homeworks:
-                submission = Submission.query.filter_by(
-                    assignment_id=hw.assignment_id,
-                    student_id=student.student_id
-                ).first()
-                
-                if submission and submission.status == 'graded' and submission.score is not None:
-                    homework_scores.append(float(submission.score))
-                else:
-                    homework_scores.append(0.0)
-            
-            current_homework_avg = sum(homework_scores) / len(homework_scores) if homework_scores else 0
-        else:
-            current_homework_avg = 0
+        # 获取成绩显示数据（优先显示归档成绩）
+        grade_display = get_student_grade_display(student.student_id, class_id)
+        grade_record = Grade.query.filter_by(student_id=student.student_id, class_id=class_id).first()
         
-        # 实时计算考试平均分（用于显示）
-        if all_exams:
-            exam_scores = []
-            for exam in all_exams:
-                submission = Submission.query.filter_by(
-                    assignment_id=exam.assignment_id,
-                    student_id=student.student_id
-                ).first()
-                
-                if submission and submission.status == 'graded' and submission.score is not None:
-                    exam_scores.append(float(submission.score))
-                else:
-                    exam_scores.append(0.0)
-            
-            current_exam_avg = sum(exam_scores) / len(exam_scores) if exam_scores else 0
+        if grade_display['is_finalized']:
+            has_finalized = True
         else:
-            current_exam_avg = 0
+            all_finalized = False
         
         grades_list.append({
             'student': student,
-            'grade': grade,
-            'current_homework_avg': current_homework_avg,
-            'current_exam_avg': current_exam_avg
+            'grade_record': grade_record,  # 数据库记录
+            'homework_avg': grade_display['homework_avg'],
+            'exam_avg': grade_display['exam_avg'],
+            'teacher_evaluation': grade_display['teacher_evaluation'],
+            'final_grade': grade_display['final_grade'],
+            'is_finalized': grade_display['is_finalized'],
+            'finalized_at': grade_display['finalized_at'],
+            'calculated_by': grade_display['calculated_by'],
+            'calculation_formula': grade_display.get('calculation_formula')
         })
     
     return render_template('teacher_class_grades.html',
@@ -1971,6 +2257,8 @@ def teacher_class_grades(class_id):
                          course=course,
                          grades_list=grades_list,
                          class_id=class_id,
+                         has_finalized=has_finalized,
+                         all_finalized=all_finalized,
                          title=f'{course.course_name} - 成绩管理')
 
 
