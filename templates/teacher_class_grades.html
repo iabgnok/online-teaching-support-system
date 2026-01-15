@@ -41,6 +41,7 @@
         <div class="nav-bar">
             <div class="nav-links">
                 <a href="{{ url_for('teacher_class_detail', class_id=class_id) }}"> 返回班级详情</a>
+                <a href="{{ url_for('teacher_class_grades_statistics', class_id=class_id) }}" style="background: #28a745;"> 📊 查看成绩统计</a>
             </div>
             <div class="nav-links">
                 <a href="{{ url_for('change_password') }}"> 修改密码</a>
@@ -81,7 +82,7 @@
             {% else %}
                 <p><strong>部分学生的成绩已归档</strong>，已归档的成绩将显示为 <span class="badge badge-success">已归档</span> 标识。</p>
             {% endif %}
-            <p style="margin: 10px 0 0 0; font-size: 0.9em; color: #666;">如需重新计算已归档的成绩，请勾选"重新归档"选项。</p>
+            <p style="margin: 10px 0 0 0; font-size: 0.9em; color: #666;">如需修改已归档的成绩，需由管理员解锁后方可重新计算。</p>
         </div>
         {% else %}
         <div class="content-section" style="background: #fff3cd; border-left: 4px solid #ffc107;">
@@ -181,7 +182,7 @@
         }
 
         function confirmFinalize() {
-            return confirm(' 确定要归档并锁定成绩吗？\n\n归档后：\n1. 成绩将被锁定，不再随作业批改而变化\n2. 学生可以查看最终确定的成绩\n3. 如需修改，需要重新归档\n\n是否继续？');
+            return confirm(' 确定要归档并锁定成绩吗？\n\n归档后：\n1. 成绩将被锁定，不再随作业批改而变化\n2. 学生可以查看最终确定的成绩\n3. 如需修改，需要通过管理员解锁成绩\n\n是否继续？');
         }
     </script>
 </body>

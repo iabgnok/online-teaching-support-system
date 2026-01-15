@@ -34,6 +34,9 @@
             <div class="tab {% if query_type == 'class' %}active{% endif %}" data-url="{{ url_for('admin_query', type='class') }}">
                 教学班查询
             </div>
+            <div class="tab {% if query_type == 'department' %}active{% endif %}" data-url="{{ url_for('admin_query', type='department') }}">
+                系部查询
+            </div>
             <div class="tab {% if query_type == 'grade' %}active{% endif %}" data-url="{{ url_for('admin_query', type='grade') }}">
                 成绩查询
             </div>
@@ -107,6 +110,15 @@
                     </div>
                 </div>
                 
+                {% elif query_type == 'department' %}
+                <h3>系部查询条件</h3>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>系部名称</label>
+                        <input type="text" name="dept_name" placeholder="支持模糊查询">
+                    </div>
+                </div>
+                
                 {% elif query_type == 'grade' %}
                 <h3>成绩查询条件</h3>
                 <div class="form-grid">
@@ -129,6 +141,13 @@
                     <div class="form-group">
                         <label>最高成绩</label>
                         <input type="number" name="max_grade" step="0.1" placeholder="如：100">
+                    </div>
+                    <div class="form-group">
+                        <label>显示详细信息</label>
+                        <select name="show_details">
+                            <option value="0">仅成绩</option>
+                            <option value="1">包含作业考试详情</option>
+                        </select>
                     </div>
                 </div>
                 {% endif %}
@@ -296,6 +315,32 @@
             </tbody>
         </table>
         
+        {% elif query_type == 'department' %}
+        <table>
+            <thead>
+                <tr>
+                    <th>系部ID</th>
+                    <th>系部名称</th>
+                    <th>教师人数</th>
+                    <th>学生人数</th>
+                    <th>管理员人数</th>
+                    <th>创建时间</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for dept_info in results %}
+                <tr>
+                    <td>{{ dept_info.dept.dept_id }}</td>
+                    <td>{{ dept_info.dept.dept_name }}</td>
+                    <td>{{ dept_info.teacher_count }}</td>
+                    <td>{{ dept_info.student_count }}</td>
+                    <td>{{ dept_info.admin_count }}</td>
+                    <td>{{ dept_info.dept.created_at.strftime('%Y-%m-%d') if dept_info.dept.created_at else '-' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        
         {% elif query_type == 'grade' %}
         <table>
             <thead>
@@ -308,21 +353,40 @@
                     <th>考试平均</th>
                     <th>教师评价</th>
                     <th>最终成绩</th>
+                    {% if show_details %}
+                    <th>已交作业</th>
+                    <th>缺交作业</th>
+                    <th>已交考试</th>
+                    <th>缺交考试</th>
+                    <th>作业完成率</th>
+                    {% endif %}
                     <th>计算时间</th>
                 </tr>
             </thead>
             <tbody>
-                {% for grade, student, teaching_class, course in results %}
+                {% for item in results %}
                 <tr>
-                    <td>{{ student.student_no }}</td>
-                    <td>{{ student.name }}</td>
-                    <td>{{ course.course_name }}</td>
-                    <td>{{ teaching_class.class_name }}</td>
-                    <td>{{ '%.1f'|format(grade.homework_avg|float) }}</td>
-                    <td>{{ '%.1f'|format(grade.exam_avg|float) }}</td>
-                    <td>{{ '%.1f'|format(grade.teacher_evaluation|float) }}</td>
-                    <td><strong>{{ '%.1f'|format(grade.final_grade|float) }}</strong></td>
-                    <td>{{ grade.calculated_at.strftime('%Y-%m-%d') if grade.calculated_at else '-' }}</td>
+                    <td>{{ item.student.student_no }}</td>
+                    <td>{{ item.student.name }}</td>
+                    <td>{{ item.course.course_name }}</td>
+                    <td>{{ item.teaching_class.class_name }}</td>
+                    <td>{{ '%.1f'|format(item.grade.homework_avg|float) }}</td>
+                    <td>{{ '%.1f'|format(item.grade.exam_avg|float) }}</td>
+                    <td>{{ '%.1f'|format(item.grade.teacher_evaluation|float) }}</td>
+                    <td><strong>{{ '%.1f'|format(item.grade.final_grade|float) }}</strong></td>
+                    {% if show_details %}
+                    <td>{{ item.homework_submitted }}</td>
+                    <td><span style="color: {% if item.homework_missing > 0 %}#e74c3c{% else %}#27ae60{% endif %}; font-weight: bold;">{{ item.homework_missing }}</span></td>
+                    <td>{{ item.exam_submitted }}</td>
+                    <td><span style="color: {% if item.exam_missing > 0 %}#e74c3c{% else %}#27ae60{% endif %}; font-weight: bold;">{{ item.exam_missing }}</span></td>
+                    <td>
+                        {% set completion_rate = ((item.homework_submitted / item.homework_total * 100)|round(1)) if item.homework_total > 0 else 0 %}
+                        <span style="color: {% if completion_rate >= 80 %}#27ae60{% elif completion_rate >= 60 %}#f39c12{% else %}#e74c3c{% endif %}; font-weight: bold;">
+                            {{ completion_rate }}%
+                        </span>
+                    </td>
+                    {% endif %}
+                    <td>{{ item.grade.calculated_at.strftime('%Y-%m-%d') if item.grade.calculated_at else '-' }}</td>
                 </tr>
                 {% endfor %}
             </tbody>

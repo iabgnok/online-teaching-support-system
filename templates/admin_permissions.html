@@ -247,7 +247,9 @@
                         <td>{{ admin.admin_no }}</td>
                         <td>
                             {{ admin.name }}
-                            {% if user.user_id == current_user.user_id %}
+                            {% if admin.admin_id == super_admin_id %}
+                                <span style="background: #f1c40f; color: #2c3e50; padding: 2px 6px; border-radius: 4px; font-size: 0.8em; font-weight: bold; margin-left: 5px;">超级管理员</span>
+                            {% elif user.user_id == current_user.user_id %}
                                 <span style="color: #e74c3c; font-weight: 600;">（当前用户）</span>
                             {% endif %}
                         </td>
@@ -263,7 +265,9 @@
                             {% endif %}
                         </td>
                         <td>
-                            {% if user.user_id == current_user.user_id %}
+                            {% if admin.admin_id == super_admin_id %}
+                                <span style="color: #f39c12; font-weight: bold;">系统超级管理员，权限已锁定</span>
+                            {% elif user.user_id == current_user.user_id %}
                                 <span style="color: #95a5a6;">无法修改自己的权限</span>
                             {% else %}
                                 <form method="POST" action="{{ url_for('admin_permissions') }}" style="display: flex; align-items: center;">

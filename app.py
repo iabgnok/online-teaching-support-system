@@ -1,17 +1,24 @@
 """在线教学支持系统 - 主应用"""
 
 # ==================== 导入依赖 ====================
-from flask import Flask, render_template, redirect, url_for, request, flash, abort, send_file, make_response
+from flask import Flask, render_template, redirect, url_for, request, flash, abort, send_file, make_response    
 from functools import wraps
-from flask_sqlalchemy import SQLAlchemy
-from flask_login import LoginManager, login_user, logout_user, current_user, login_required
+from flask_sqlalchemy import SQLAlchemy 
+from flask_login import LoginManager, login_user, logout_user, current_user, login_required 
 from config import DevelopmentConfig
 import csv
 import io
 from datetime import datetime
 import os
-from werkzeug.utils import secure_filename
-from models import Users, Admin, Student, Teacher, Course, TeachingClass, StudentClass, TeacherClass, Assignment, Submission, Grade, Material, Department, db
+from werkzeug.utils import secure_filename  
+from models import (
+    Users, Admin, Student, Teacher, Course, TeachingClass, StudentClass, TeacherClass, 
+    Assignment, Submission, Grade, Material, Department, db,
+    # 视图模型
+    VStudentMyCourses, VStudentMyAssignments, VStudentMyGrades,
+    VTeacherMyClasses, VTeacherStudentList, VTeacherSubmissionStatus,
+    VAdminUserStatistics, VAdminCourseStatistics
+)
 
 # ==================== 应用初始化 ====================
 app = Flask(__name__)
@@ -177,7 +184,10 @@ def get_student_grade_display(student_id, class_id):
 @login_manager.user_loader
 def load_user(user_id):
     """加载用户对象"""
-    return db.session.get(Users, user_id) 
+    user = db.session.get(Users, user_id)
+    if user and user.status == 0:
+        return None
+    return user 
 
 def role_required(role):
     """角色权限装饰器：限制特定角色访问"""
@@ -222,6 +232,10 @@ def login():
         
         if user is None or not user.verify_password(password):
             flash('用户名或密码错误。', 'danger')
+            return redirect(url_for('login'))
+
+        if user.status == 0:
+            flash('您的账户已被禁用，无法登录。请联系管理员。', 'danger')
             return redirect(url_for('login'))
 
         login_user(user)
@@ -348,15 +362,19 @@ def admin_user_management():
         query = query.filter(Users.username.like(f'%{search_username}%'))
     
     users = query.all()
-    admin_count = Admin.query.count()
-    teacher_count = Teacher.query.count()
-    student_count = Student.query.count()
+    
+    # 使用视图获取统计数据（按院系统计）
+    user_stats = VAdminUserStatistics.query.all()
+    admin_count = sum(s.total_admin_count for s in user_stats)
+    teacher_count = sum(s.total_teacher_count for s in user_stats)
+    student_count = sum(s.total_student_count for s in user_stats)
     
     return render_template('admin_user_management.html', 
                            users=users,
                            admin_count=admin_count,
                            teacher_count=teacher_count,
                            student_count=student_count,
+                           user_stats=user_stats,
                            role_filter=role_filter,
                            status_filter=status_filter,
                            search_name=search_name,
@@ -375,6 +393,12 @@ def admin_toggle_status(user_id):
         flash('未找到该用户。', 'danger')
     elif user.user_id == current_user.user_id:
         flash('无法禁用当前登录用户。', 'danger')
+    elif user.role == 'admin' and user.admin_profile:
+        # 禁止禁用系统超级管理员
+        super_admin_id = db.session.query(db.func.min(Admin.admin_id)).scalar()
+        if user.admin_profile.admin_id == super_admin_id:
+            flash('❌ 无法禁用系统超级管理员！', 'danger')
+            return redirect(url_for('admin_user_management'))
     else:
         user.status = 1 - user.status
         db.session.commit()
@@ -457,6 +481,12 @@ def admin_delete_user(user_id):
         elif role == 'admin':
             admin = user.admin_profile
             if admin:
+                # 禁止删除系统核心超级管理员（第一位被导入的管理员，admin_id 最小）
+                super_admin_id = db.session.query(db.func.min(Admin.admin_id)).scalar()
+                if admin.admin_id == super_admin_id:
+                    flash('❌ 无法删除系统超级管理员！', 'danger')
+                    return redirect(url_for('admin_user_management'))
+                
                 # 删除管理员记录
                 db.session.delete(admin)
         
@@ -639,15 +669,21 @@ def admin_create_user():
                 
                 dept_id = get_or_create_department(request.form.get('department')) if request.form.get('department') else None
                 
+                # 检查是否为系统中首个管理员
+                is_first_admin = db.session.query(db.func.count(Admin.admin_id)).scalar() == 0
+                
                 new_admin = Admin(
                     admin_id=generate_next_id(Admin, 'admin_id'),
                     user_id=new_user_id,
                     admin_no=admin_no,
                     dept_id=dept_id,
-                    permission_level=int(permission_level)
+                    permission_level=1 if is_first_admin else int(permission_level)
                 )
                 db.session.add(new_admin)
-                flash(f'✅ 管理员账户 {real_name} (编号: {admin_no}) 创建成功！', 'success')
+                if is_first_admin:
+                    flash(f'✅ 系统首位管理员 {real_name} 已自动设为核心超级管理员（一级权限）。', 'success')
+                else:
+                    flash(f'✅ 管理员账户 {real_name} (编号: {admin_no}) 创建成功！', 'success')
                 
             elif role == 'teacher':
                 teacher_no = request.form.get('teacher_no')
@@ -723,14 +759,20 @@ def admin_create_teacher():
 @admin_permission_required(1)
 def admin_permissions():
     """管理员权限管理页面（需要最高权限）"""
+    # 确定系统中的超级管理员（第一位被导入的管理员，admin_id 最小）
+    super_admin_id = db.session.query(db.func.min(Admin.admin_id)).scalar()
+    
     if request.method == 'POST':
-        admin_id = request.form.get('admin_id')
+        admin_id = request.form.get('admin_id', type=int)
         new_permission = request.form.get('permission_level')
         
         admin = db.session.get(Admin, admin_id)
         if admin:
+            # 检查是否是超级管理员
+            if admin_id == super_admin_id:
+                flash('超级管理员的权限无法被修改！', 'danger')
             # 不能修改自己的权限
-            if admin.user_id == current_user.user_id:
+            elif admin.user_id == current_user.user_id:
                 flash('不能修改自己的权限！', 'danger')
             else:
                 old_level = admin.permission_level
@@ -748,6 +790,7 @@ def admin_permissions():
     return render_template('admin_permissions.html',
                          user=current_user,
                          admins=admins,
+                         super_admin_id=super_admin_id,
                          title='权限管理')
 
 
@@ -1108,11 +1151,14 @@ def admin_batch_import():
                     
                     # 创建角色特定记录
                     if role == 'admin':
+                        # 检查是否为系统中首个管理员
+                        is_first_admin = db.session.query(db.func.count(Admin.admin_id)).scalar() == 0
                         new_role = Admin(
                             admin_id=generate_next_id(Admin, 'admin_id'),
                             user_id=new_user_id,
                             admin_no=role_no,
-                            dept_id=dept_id
+                            dept_id=dept_id,
+                            permission_level=1 if is_first_admin else 3
                         )
                     elif role == 'teacher':
                         new_role = Teacher(
@@ -1495,58 +1541,58 @@ def admin_import_teacher_classes():
 @login_required
 @role_required('student')
 def student_dashboard():
-    """学生仪表板 - 显示选课列表"""
+    """学生仪表板 - 显示选课列表（使用视图优化）"""
     student = current_user.student_profile
     
-    # 获取学生的所有选课记录
-    enrollments = StudentClass.query.filter_by(student_id=student.student_id).all()
+    # 使用视图获取我的课程（简化查询）
+    my_courses = VStudentMyCourses.query.filter_by(student_id=student.student_id).all()
     
     # 统计数据初始化
     total_pending_assignments = 0
-    total_courses = len(enrollments)
+    total_courses = len(my_courses)
     grades_list = []
     
     # 构建课程信息列表
     courses_info = []
-    for sc in enrollments:
-        teaching_class = sc.teaching_class
-        course = teaching_class.course
+    now = datetime.now()
+    
+    for course_view in my_courses:
+        # 获取该课程未提交且未截止的作业
+        pending_assignments_data = VStudentMyAssignments.query.filter(
+            VStudentMyAssignments.student_id == student.student_id,
+            VStudentMyAssignments.class_id == course_view.class_id,
+            VStudentMyAssignments.submission_id == None,
+            VStudentMyAssignments.deadline > now
+        ).all()
         
-        # 获取未提交的作业列表（排除已截止的作业）
-        assignments = Assignment.query.filter_by(class_id=teaching_class.class_id, status=1).all()
-        pending_assignments = []
-        now = datetime.now()
-        for assignment in assignments:
-            submission = Submission.query.filter_by(
-                assignment_id=assignment.assignment_id,
-                student_id=student.student_id
-            ).first()
-            # 只显示未提交且未截止的作业
-            if not submission and assignment.deadline > now:
-                pending_assignments.append({
-                    'assignment_id': assignment.assignment_id,
-                    'title': assignment.title,
-                    'type': assignment.type,
-                    'deadline': assignment.deadline
-                })
+        pending_assignments = [{
+            'assignment_id': a.assignment_id,
+            'title': a.assignment_title,
+            'type': a.assignment_type,
+            'deadline': a.deadline
+        } for a in pending_assignments_data]
         
         total_pending_assignments += len(pending_assignments)
         
-        # 获取成绩
-        grade = Grade.query.filter_by(student_id=student.student_id, class_id=teaching_class.class_id).first()
-        if grade and grade.final_grade is not None:
-            grades_list.append(grade.final_grade)
+        # 获取成绩（使用视图）
+        grade_view = VStudentMyGrades.query.filter_by(
+            student_id=student.student_id,
+            class_id=course_view.class_id
+        ).first()
+        
+        if grade_view and grade_view.final_grade is not None:
+            grades_list.append(float(grade_view.final_grade))
         
         courses_info.append({
-            'class_id': teaching_class.class_id,
-            'course_name': course.course_name,
-            'class_name': teaching_class.class_name,
-            'semester': teaching_class.semester,
-            'classroom': teaching_class.classroom,
-            'class_time': teaching_class.class_time,
-            'credit': course.credit,
+            'class_id': course_view.class_id,
+            'course_name': course_view.course_name,
+            'class_name': course_view.class_name,
+            'semester': course_view.semester,
+            'classroom': course_view.classroom,
+            'class_time': course_view.class_time,
+            'credit': float(course_view.credit) if course_view.credit else None,
             'pending_assignments': pending_assignments,
-            'final_grade': grade.final_grade if grade else None
+            'final_grade': float(grade_view.final_grade) if grade_view and grade_view.final_grade else None
         })
     
     # 计算平均成绩
@@ -1572,7 +1618,7 @@ def student_dashboard():
 @login_required
 @role_required('student')
 def student_class_detail(class_id):
-    """学生查看课程详情"""
+    """学生查看课程详情（使用视图优化）"""
     student = current_user.student_profile
     
     # 验证学生是否选修该课程
@@ -1584,20 +1630,40 @@ def student_class_detail(class_id):
     teaching_class = enrollment.teaching_class
     course = teaching_class.course
     
-    # 获取作业/考试列表及提交状态
-    assignments = Assignment.query.filter_by(class_id=class_id, status=1).order_by(Assignment.deadline.desc()).all()
+    # 使用视图获取作业列表及提交状态（一次查询获取所有信息）
+    assignments_view = VStudentMyAssignments.query.filter_by(
+        student_id=student.student_id,
+        class_id=class_id
+    ).order_by(VStudentMyAssignments.deadline.desc()).all()
     
     assignments_info = []
-    for assignment in assignments:
-        submission = Submission.query.filter_by(
-            assignment_id=assignment.assignment_id,
-            student_id=student.student_id
-        ).first()
+    for av in assignments_view:
+        # 构建assignment对象（用于兼容现有模板）
+        assignment_obj = type('obj', (object,), {
+            'assignment_id': av.assignment_id,
+            'title': av.assignment_title,
+            'type': av.assignment_type,
+            'description': av.description,
+            'total_score': av.total_score,
+            'deadline': av.deadline,
+            'publish_time': av.publish_time
+        })
+        
+        # 构建submission对象（如果有）
+        submission_obj = None
+        if av.submission_id:
+            submission_obj = type('obj', (object,), {
+                'submission_id': av.submission_id,
+                'submit_time': av.submit_time,
+                'score': av.score,
+                'feedback': av.feedback,
+                'status': av.submission_status
+            })
         
         assignments_info.append({
-            'assignment': assignment,
-            'submission': submission,
-            'status': '已批改' if submission and submission.status == 'graded' else ('已提交' if submission else '未提交')
+            'assignment': assignment_obj,
+            'submission': submission_obj,
+            'status': av.status_display
         })
     
     # 获取教学资料列表
@@ -1780,40 +1846,33 @@ def student_view_grades(class_id):
 @login_required
 @role_required('teacher')
 def teacher_dashboard():
-    """教师仪表板 - 显示任教班级列表"""
+    """教师仪表板 - 显示任教班级列表（使用视图优化）"""
     teacher = current_user.teacher_profile
     
-    # 获取教师任教的所有班级
-    teaching_assignments = TeacherClass.query.filter_by(teacher_id=teacher.teacher_id).all()
+    # 使用视图获取教师的所有教学班（包含学生人数）
+    my_classes = VTeacherMyClasses.query.filter_by(teacher_id=teacher.teacher_id).all()
     
-    # 统计数据初始化
-    total_classes = len(teaching_assignments)
-    total_students = 0
-    total_pending_grading = 0
-    class_ids = [tc.class_id for tc in teaching_assignments]
+    # 统计数据
+    total_classes = len(my_classes)
+    total_students = sum(c.enrolled_count for c in my_classes)
+    class_ids = [c.class_id for c in my_classes]
     
     # 构建班级信息列表
     classes_info = []
-    for tc in teaching_assignments:
-        teaching_class = tc.teaching_class
-        course = teaching_class.course
-        
-        # 统计学生人数
-        student_count = StudentClass.query.filter_by(class_id=teaching_class.class_id).count()
-        total_students += student_count
-        
+    for class_view in my_classes:
         classes_info.append({
-            'class_id': teaching_class.class_id,
-            'course_name': course.course_name,
-            'class_name': teaching_class.class_name,
-            'semester': teaching_class.semester,
-            'classroom': teaching_class.classroom,
-            'class_time': teaching_class.class_time,
-            'student_count': student_count,
-            'role': tc.role
+            'class_id': class_view.class_id,
+            'course_name': class_view.course_name,
+            'class_name': class_view.class_name,
+            'semester': class_view.semester,
+            'classroom': class_view.classroom,
+            'class_time': class_view.class_time,
+            'student_count': class_view.enrolled_count,
+            'role': class_view.my_role
         })
     
     # 统计待批改作业数
+    total_pending_grading = 0
     if class_ids:
         total_pending_grading = Submission.query.join(
             Assignment, Submission.assignment_id == Assignment.assignment_id
@@ -1987,7 +2046,7 @@ def teacher_create_assignment(class_id):
 @login_required
 @role_required('teacher')
 def teacher_assignment_detail(assignment_id):
-    """教师查看作业/考试提交情况"""
+    """教师查看作业/考试提交情况（使用视图优化）"""
     teacher = current_user.teacher_profile
     
     assignment = db.session.get(Assignment, assignment_id)
@@ -2000,6 +2059,12 @@ def teacher_assignment_detail(assignment_id):
     if not tc:
         flash('您没有权限查看该作业', 'danger')
         return redirect(url_for('teacher_class_detail', class_id=assignment.class_id))
+    
+    # 使用视图获取统计数据（一次查询获取所有统计）
+    stats_view = VTeacherSubmissionStatus.query.filter_by(
+        teacher_id=teacher.teacher_id,
+        assignment_id=assignment_id
+    ).first()
     
     # 获取所有应该提交的学生
     enrollments = StudentClass.query.filter_by(class_id=assignment.class_id).all()
@@ -2019,10 +2084,20 @@ def teacher_assignment_detail(assignment_id):
             'status': '已批改' if submission and submission.status == 'graded' else ('已提交' if submission else '未提交')
         })
     
-    # 统计信息
-    total_students = len(submission_list)
-    submitted_count = sum(1 for s in submission_list if s['submission'])
-    graded_count = sum(1 for s in submission_list if s['submission'] and s['submission'].status == 'graded')
+    # 从视图获取统计信息（如果视图查询成功）
+    if stats_view:
+        total_students = stats_view.total_students
+        submitted_count = stats_view.submitted_count
+        graded_count = stats_view.graded_count
+        unsubmitted_count = stats_view.unsubmitted_count
+        submission_rate = stats_view.submission_rate
+    else:
+        # 回退到传统统计方式
+        total_students = len(submission_list)
+        submitted_count = sum(1 for s in submission_list if s['submission'])
+        graded_count = sum(1 for s in submission_list if s['submission'] and s['submission'].status == 'graded')
+        unsubmitted_count = total_students - submitted_count
+        submission_rate = (submitted_count / total_students * 100) if total_students > 0 else 0
     
     return render_template('teacher_assignment_detail.html',
                          user=current_user,
@@ -2031,6 +2106,8 @@ def teacher_assignment_detail(assignment_id):
                          total_students=total_students,
                          submitted_count=submitted_count,
                          graded_count=graded_count,
+                         unsubmitted_count=unsubmitted_count,
+                         submission_rate=round(submission_rate, 1),
                          title=f'{assignment.title} - 提交情况')
 
 
@@ -2159,6 +2236,8 @@ def teacher_calculate_grades(class_id):
                 if finalize:
                     grade.finalize(teacher.teacher_id, formula)
                     finalized_count += 1
+                
+                success_count += 1
             else:
                 # 创建新记录 - 新学生必须输入评价分
                 teacher_evaluation = float(teacher_eval_str) if teacher_eval_str else 0.0
@@ -2260,6 +2339,111 @@ def teacher_class_grades(class_id):
                          has_finalized=has_finalized,
                          all_finalized=all_finalized,
                          title=f'{course.course_name} - 成绩管理')
+
+
+@app.route('/teacher/class/<int:class_id>/grades_statistics')
+@login_required
+@role_required('teacher')
+def teacher_class_grades_statistics(class_id):
+    """教师查看班级成绩统计（全班平均分、排名等）"""
+    teacher = current_user.teacher_profile
+    
+    # 验证权限
+    tc = TeacherClass.query.filter_by(teacher_id=teacher.teacher_id, class_id=class_id).first()
+    if not tc:
+        flash('您没有权限查看该班级成绩统计', 'danger')
+        return redirect(url_for('teacher_class_detail', class_id=class_id))
+    
+    teaching_class = tc.teaching_class
+    course = teaching_class.course
+    
+    # 获取所有学生和成绩
+    enrollments = StudentClass.query.filter_by(class_id=class_id).all()
+    
+    grades_data = []
+    for enrollment in enrollments:
+        student = enrollment.student
+        grade_display = get_student_grade_display(student.student_id, class_id)
+        
+        grades_data.append({
+            'student': student,
+            'homework_avg': grade_display['homework_avg'],
+            'exam_avg': grade_display['exam_avg'],
+            'teacher_evaluation': grade_display['teacher_evaluation'],
+            'final_grade': grade_display['final_grade'],
+            'is_finalized': grade_display['is_finalized']
+        })
+    
+    # 计算统计数据
+    if grades_data:
+        # 按最终成绩排序
+        sorted_grades = sorted(grades_data, key=lambda x: x['final_grade'], reverse=True)
+        
+        # 添加排名
+        for idx, item in enumerate(sorted_grades, 1):
+            item['rank'] = idx
+        
+        # 计算平均分
+        final_grades = [g['final_grade'] for g in grades_data]
+        homework_avgs = [g['homework_avg'] for g in grades_data]
+        exam_avgs = [g['exam_avg'] for g in grades_data]
+        teacher_evals = [g['teacher_evaluation'] for g in grades_data if g['teacher_evaluation'] > 0]
+        
+        class_avg_final = sum(final_grades) / len(final_grades) if final_grades else 0
+        class_avg_homework = sum(homework_avgs) / len(homework_avgs) if homework_avgs else 0
+        class_avg_exam = sum(exam_avgs) / len(exam_avgs) if exam_avgs else 0
+        class_avg_teacher_eval = sum(teacher_evals) / len(teacher_evals) if teacher_evals else 0
+        
+        # 计算最高分、最低分、及格率
+        max_grade = max(final_grades) if final_grades else 0
+        min_grade = min(final_grades) if final_grades else 0
+        pass_count = len([g for g in final_grades if g >= 60])
+        pass_rate = (pass_count / len(final_grades) * 100) if final_grades else 0
+        
+        # 计算分数段统计
+        score_ranges = {
+            '90-100': len([g for g in final_grades if 90 <= g <= 100]),
+            '80-89': len([g for g in final_grades if 80 <= g < 90]),
+            '70-79': len([g for g in final_grades if 70 <= g < 80]),
+            '60-69': len([g for g in final_grades if 60 <= g < 70]),
+            '0-59': len([g for g in final_grades if 0 <= g < 60])
+        }
+        
+        statistics = {
+            'class_avg_final': round(class_avg_final, 2),
+            'class_avg_homework': round(class_avg_homework, 2),
+            'class_avg_exam': round(class_avg_exam, 2),
+            'class_avg_teacher_eval': round(class_avg_teacher_eval, 2),
+            'max_grade': round(max_grade, 2),
+            'min_grade': round(min_grade, 2),
+            'pass_rate': round(pass_rate, 2),
+            'pass_count': pass_count,
+            'total_count': len(final_grades),
+            'score_ranges': score_ranges
+        }
+    else:
+        statistics = {
+            'class_avg_final': 0,
+            'class_avg_homework': 0,
+            'class_avg_exam': 0,
+            'class_avg_teacher_eval': 0,
+            'max_grade': 0,
+            'min_grade': 0,
+            'pass_rate': 0,
+            'pass_count': 0,
+            'total_count': 0,
+            'score_ranges': {}
+        }
+        sorted_grades = []
+    
+    return render_template('teacher_class_grades_statistics.html',
+                         user=current_user,
+                         teaching_class=teaching_class,
+                         course=course,
+                         sorted_grades=sorted_grades,
+                         statistics=statistics,
+                         class_id=class_id,
+                         title=f'{course.course_name} - 成绩统计')
 
 
 @app.route('/teacher/class/<int:class_id>/upload_material', methods=['GET', 'POST'])
@@ -2680,6 +2864,7 @@ def admin_query():
     """管理员综合查询"""
     results = []
     query_type = request.args.get('type', 'user')
+    show_details = False
     
     if request.method == 'POST' or request.args.get('search'):
         query_type = request.form.get('query_type') or request.args.get('type', 'user')
@@ -2735,13 +2920,38 @@ def admin_query():
             
             results = query.all()
             
+        elif query_type == 'department':
+            # 系部查询
+            dept_name = request.form.get('dept_name') or request.args.get('dept_name', '')
+            
+            query = Department.query
+            if dept_name:
+                query = query.filter(Department.dept_name.like(f'%{dept_name}%'))
+            
+            departments = query.all()
+            
+            # 统计每个系部的人员数量
+            results = []
+            for dept in departments:
+                teacher_count = Teacher.query.filter_by(dept_id=dept.dept_id).count()
+                student_count = Student.query.filter_by(dept_id=dept.dept_id).count()
+                admin_count = Admin.query.filter_by(dept_id=dept.dept_id).count()
+                
+                results.append({
+                    'dept': dept,
+                    'teacher_count': teacher_count,
+                    'student_count': student_count,
+                    'admin_count': admin_count
+                })
+            
         elif query_type == 'grade':
-            # 成绩查询
+            # 成绩查询（增强版）
             student_no = request.form.get('student_no') or request.args.get('student_no', '')
             student_name = request.form.get('student_name') or request.args.get('student_name', '')
             course_name = request.form.get('course_name') or request.args.get('course_name', '')
             min_grade = request.form.get('min_grade') or request.args.get('min_grade', '')
             max_grade = request.form.get('max_grade') or request.args.get('max_grade', '')
+            show_details = bool(request.form.get('show_details') == '1' or request.args.get('show_details') == '1')
             
             query = db.session.query(Grade, Student, TeachingClass, Course).join(
                 Student, Grade.student_id == Student.student_id
@@ -2762,12 +2972,70 @@ def admin_query():
             if max_grade:
                 query = query.filter(Grade.final_grade <= float(max_grade))
             
-            results = query.all()
+            grade_records = query.all()
+            
+            # 如果需要显示详细信息，计算作业考试缺交情况
+            if show_details:
+                results = []
+                for grade, student, teaching_class, course in grade_records:
+                    # 获取该班级的所有作业和考试
+                    all_homeworks = Assignment.query.filter_by(
+                        class_id=teaching_class.class_id, 
+                        type='homework', 
+                        status=1
+                    ).all()
+                    all_exams = Assignment.query.filter_by(
+                        class_id=teaching_class.class_id, 
+                        type='exam', 
+                        status=1
+                    ).all()
+                    
+                    # 统计已提交的作业和考试
+                    homework_submitted = 0
+                    exam_submitted = 0
+                    
+                    for hw in all_homeworks:
+                        submission = Submission.query.filter_by(
+                            assignment_id=hw.assignment_id,
+                            student_id=student.student_id
+                        ).first()
+                        if submission and submission.status in ['submitted', 'graded']:
+                            homework_submitted += 1
+                    
+                    for exam in all_exams:
+                        submission = Submission.query.filter_by(
+                            assignment_id=exam.assignment_id,
+                            student_id=student.student_id
+                        ).first()
+                        if submission and submission.status in ['submitted', 'graded']:
+                            exam_submitted += 1
+                    
+                    homework_total = len(all_homeworks)
+                    exam_total = len(all_exams)
+                    homework_missing = homework_total - homework_submitted
+                    exam_missing = exam_total - exam_submitted
+                    
+                    results.append({
+                        'grade': grade,
+                        'student': student,
+                        'teaching_class': teaching_class,
+                        'course': course,
+                        'homework_submitted': homework_submitted,
+                        'homework_total': homework_total,
+                        'homework_missing': homework_missing,
+                        'exam_submitted': exam_submitted,
+                        'exam_total': exam_total,
+                        'exam_missing': exam_missing
+                    })
+            else:
+                results = [{'grade': g, 'student': s, 'teaching_class': tc, 'course': c} 
+                          for g, s, tc, c in grade_records]
     
     return render_template('admin_query.html',
                          user=current_user,
                          query_type=query_type,
                          results=results,
+                         show_details=show_details,
                          title='综合查询')
 
 
@@ -3127,12 +3395,40 @@ def admin_query_export():
         
         filename = f'教学班查询_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
         
+    elif query_type == 'department':
+        # 系部查询导出
+        dept_name = request.args.get('dept_name', '')
+        
+        query = Department.query
+        if dept_name:
+            query = query.filter(Department.dept_name.like(f'%{dept_name}%'))
+        
+        departments = query.all()
+        
+        writer.writerow(['系部ID', '系部名称', '教师人数', '学生人数', '管理员人数', '创建时间'])
+        for dept in departments:
+            teacher_count = Teacher.query.filter_by(dept_id=dept.dept_id).count()
+            student_count = Student.query.filter_by(dept_id=dept.dept_id).count()
+            admin_count = Admin.query.filter_by(dept_id=dept.dept_id).count()
+            
+            writer.writerow([
+                dept.dept_id,
+                dept.dept_name,
+                teacher_count,
+                student_count,
+                admin_count,
+                dept.created_at.strftime('%Y-%m-%d') if dept.created_at else '-'
+            ])
+        
+        filename = f'系部查询_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
+        
     elif query_type == 'grade':
         student_no = request.args.get('student_no', '')
         student_name = request.args.get('student_name', '')
         course_name = request.args.get('course_name', '')
         min_grade = request.args.get('min_grade', '')
         max_grade = request.args.get('max_grade', '')
+        show_details = request.args.get('show_details') == '1'
         
         query = db.session.query(Grade, Student, TeachingClass, Course).join(
             Student, Grade.student_id == Student.student_id
@@ -3155,18 +3451,55 @@ def admin_query_export():
         
         results = query.all()
         
-        writer.writerow(['学号', '姓名', '课程名称', '教学班', '平时成绩', '期末成绩', '教师评分', '最终成绩'])
-        for grade, student, tc, course in results:
-            writer.writerow([
-                student.student_no,
-                student.name,
-                course.course_name,
-                tc.class_name,
-                f'{grade.regular_grade:.1f}' if grade.regular_grade else '-',
-                f'{grade.exam_grade:.1f}' if grade.exam_grade else '-',
-                f'{grade.teacher_score:.1f}' if grade.teacher_score else '-',
-                f'{grade.final_grade:.1f}' if grade.final_grade else '-'
-            ])
+        if show_details:
+            writer.writerow(['学号', '姓名', '课程名称', '教学班', '作业平均', '考试平均', '教师评价', '最终成绩', 
+                           '已交作业', '缺交作业', '已交考试', '缺交考试', '作业完成率'])
+            for grade, student, tc, course in results:
+                # 计算作业考试缺交情况
+                all_homeworks = Assignment.query.filter_by(class_id=tc.class_id, type='homework', status=1).all()
+                all_exams = Assignment.query.filter_by(class_id=tc.class_id, type='exam', status=1).all()
+                
+                homework_submitted = sum(1 for hw in all_homeworks 
+                                       if Submission.query.filter_by(assignment_id=hw.assignment_id, student_id=student.student_id)
+                                       .filter(Submission.status.in_(['submitted', 'graded'])).first())
+                exam_submitted = sum(1 for exam in all_exams 
+                                   if Submission.query.filter_by(assignment_id=exam.assignment_id, student_id=student.student_id)
+                                   .filter(Submission.status.in_(['submitted', 'graded'])).first())
+                
+                homework_total = len(all_homeworks)
+                exam_total = len(all_exams)
+                homework_missing = homework_total - homework_submitted
+                exam_missing = exam_total - exam_submitted
+                completion_rate = (homework_submitted / homework_total * 100) if homework_total > 0 else 0
+                
+                writer.writerow([
+                    student.student_no,
+                    student.name,
+                    course.course_name,
+                    tc.class_name,
+                    f'{float(grade.homework_avg):.1f}' if grade.homework_avg else '-',
+                    f'{float(grade.exam_avg):.1f}' if grade.exam_avg else '-',
+                    f'{float(grade.teacher_evaluation):.1f}' if grade.teacher_evaluation else '-',
+                    f'{float(grade.final_grade):.1f}' if grade.final_grade else '-',
+                    homework_submitted,
+                    homework_missing,
+                    exam_submitted,
+                    exam_missing,
+                    f'{completion_rate:.1f}%'
+                ])
+        else:
+            writer.writerow(['学号', '姓名', '课程名称', '教学班', '作业平均', '考试平均', '教师评价', '最终成绩'])
+            for grade, student, tc, course in results:
+                writer.writerow([
+                    student.student_no,
+                    student.name,
+                    course.course_name,
+                    tc.class_name,
+                    f'{float(grade.homework_avg):.1f}' if grade.homework_avg else '-',
+                    f'{float(grade.exam_avg):.1f}' if grade.exam_avg else '-',
+                    f'{float(grade.teacher_evaluation):.1f}' if grade.teacher_evaluation else '-',
+                    f'{float(grade.final_grade):.1f}' if grade.final_grade else '-'
+                ])
         
         filename = f'成绩查询_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
     

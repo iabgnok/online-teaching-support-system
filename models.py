@@ -1,7 +1,7 @@
-from flask_sqlalchemy import SQLAlchemy
-from flask_login import UserMixin
-from sqlalchemy.sql import func
-from werkzeug.security import generate_password_hash, check_password_hash
+from flask_sqlalchemy import SQLAlchemy  # type: ignore
+from flask_login import UserMixin   # type: ignore
+from sqlalchemy.sql import func  # type: ignore
+from werkzeug.security import generate_password_hash, check_password_hash   # type: ignore
 
 db = SQLAlchemy()
 
@@ -336,3 +336,174 @@ class Grade(db.Model):
         self.calculated_by = teacher_id
         self.calculated_at = datetime.now()
         self.calculation_formula = formula
+
+
+# ==================== 子模式视图（只读） ====================
+
+class VStudentMyCourses(db.Model):
+    """学生选课视图 - 只读"""
+    __tablename__ = 'V_Student_MyCourses'
+    __table_args__ = {'info': {'is_view': True}}
+    
+    student_id = db.Column(db.BigInteger, primary_key=True)
+    class_id = db.Column(db.BigInteger, primary_key=True)
+    course_id = db.Column(db.BigInteger)
+    course_name = db.Column(db.String(100))
+    course_code = db.Column(db.String(50))
+    credit = db.Column(db.Numeric(3, 1))
+    class_name = db.Column(db.String(100))
+    semester = db.Column(db.String(20))
+    class_time = db.Column(db.String(200))
+    classroom = db.Column(db.String(100))
+    capacity = db.Column(db.Integer)
+    teacher_name = db.Column(db.String(50))
+    teacher_no = db.Column(db.String(20))
+    enroll_time = db.Column(db.DateTime(timezone=True))
+    enrollment_status = db.Column(db.SmallInteger)
+
+
+class VStudentMyAssignments(db.Model):
+    """学生作业视图 - 只读"""
+    __tablename__ = 'V_Student_MyAssignments'
+    __table_args__ = {'info': {'is_view': True}}
+    
+    student_id = db.Column(db.BigInteger, primary_key=True)
+    assignment_id = db.Column(db.BigInteger, primary_key=True)
+    class_id = db.Column(db.BigInteger)
+    assignment_title = db.Column(db.String(200))
+    assignment_type = db.Column(db.String(20))
+    description = db.Column(db.Text)
+    total_score = db.Column(db.Numeric(5, 2))
+    deadline = db.Column(db.DateTime(timezone=True))
+    publish_time = db.Column(db.DateTime(timezone=True))
+    course_name = db.Column(db.String(100))
+    class_name = db.Column(db.String(100))
+    semester = db.Column(db.String(20))
+    submission_id = db.Column(db.BigInteger)
+    submit_time = db.Column(db.DateTime(timezone=True))
+    score = db.Column(db.Numeric(5, 2))
+    feedback = db.Column(db.Text)
+    submission_status = db.Column(db.String(20))
+    status_display = db.Column(db.String(50))
+    is_overdue = db.Column(db.Integer)
+
+
+class VStudentMyGrades(db.Model):
+    """学生成绩视图 - 只读"""
+    __tablename__ = 'V_Student_MyGrades'
+    __table_args__ = {'info': {'is_view': True}}
+    
+    student_id = db.Column(db.BigInteger, primary_key=True)
+    class_id = db.Column(db.BigInteger, primary_key=True)
+    course_id = db.Column(db.BigInteger)
+    course_name = db.Column(db.String(100))
+    course_code = db.Column(db.String(50))
+    credit = db.Column(db.Numeric(3, 1))
+    class_name = db.Column(db.String(100))
+    semester = db.Column(db.String(20))
+    homework_avg = db.Column(db.Numeric(5, 2))
+    exam_avg = db.Column(db.Numeric(5, 2))
+    teacher_evaluation = db.Column(db.Numeric(5, 2))
+    final_grade = db.Column(db.Numeric(5, 2))
+    remarks = db.Column(db.Text)
+    is_finalized = db.Column(db.Boolean)
+    finalized_at = db.Column(db.DateTime(timezone=True))
+    calculation_formula = db.Column(db.String(200))
+    calculator_name = db.Column(db.String(50))
+
+
+class VTeacherMyClasses(db.Model):
+    """教师教学班视图 - 只读"""
+    __tablename__ = 'V_Teacher_MyClasses'
+    __table_args__ = {'info': {'is_view': True}}
+    
+    teacher_id = db.Column(db.BigInteger, primary_key=True)
+    class_id = db.Column(db.BigInteger, primary_key=True)
+    course_id = db.Column(db.BigInteger)
+    course_name = db.Column(db.String(100))
+    course_code = db.Column(db.String(50))
+    credit = db.Column(db.Numeric(3, 1))
+    class_name = db.Column(db.String(100))
+    semester = db.Column(db.String(20))
+    class_time = db.Column(db.String(200))
+    classroom = db.Column(db.String(100))
+    capacity = db.Column(db.Integer)
+    my_role = db.Column(db.String(20))
+    enrolled_count = db.Column(db.Integer)
+    class_status = db.Column(db.SmallInteger)
+
+
+class VTeacherStudentList(db.Model):
+    """教师学生名单视图 - 只读"""
+    __tablename__ = 'V_Teacher_StudentList'
+    __table_args__ = {'info': {'is_view': True}}
+    
+    teacher_id = db.Column(db.BigInteger, primary_key=True)
+    class_id = db.Column(db.BigInteger, primary_key=True)
+    student_id = db.Column(db.BigInteger, primary_key=True)
+    class_name = db.Column(db.String(100))
+    semester = db.Column(db.String(20))
+    course_name = db.Column(db.String(100))
+    student_no = db.Column(db.String(10))
+    student_name = db.Column(db.String(50))
+    dept_name = db.Column(db.String(100))
+    major = db.Column(db.String(100))
+    email = db.Column(db.String(100))
+    phone = db.Column(db.String(20))
+    enroll_time = db.Column(db.DateTime(timezone=True))
+
+
+class VTeacherSubmissionStatus(db.Model):
+    """作业提交统计视图 - 只读"""
+    __tablename__ = 'V_Teacher_SubmissionStatus'
+    __table_args__ = {'info': {'is_view': True}}
+    
+    teacher_id = db.Column(db.BigInteger, primary_key=True)
+    assignment_id = db.Column(db.BigInteger, primary_key=True)
+    class_id = db.Column(db.BigInteger)
+    class_name = db.Column(db.String(100))
+    semester = db.Column(db.String(20))
+    course_name = db.Column(db.String(100))
+    assignment_title = db.Column(db.String(200))
+    assignment_type = db.Column(db.String(20))
+    deadline = db.Column(db.DateTime(timezone=True))
+    total_score = db.Column(db.Numeric(5, 2))
+    total_students = db.Column(db.Integer)
+    submitted_count = db.Column(db.Integer)
+    graded_count = db.Column(db.Integer)
+    unsubmitted_count = db.Column(db.Integer)
+    submission_rate = db.Column(db.Float)
+
+
+class VAdminUserStatistics(db.Model):
+    """管理员用户统计视图 - 只读"""
+    __tablename__ = 'V_Admin_UserStatistics'
+    __table_args__ = {'info': {'is_view': True}}
+    
+    dept_id = db.Column(db.BigInteger, primary_key=True)
+    dept_name = db.Column(db.String(100))
+    active_student_count = db.Column(db.Integer)
+    active_teacher_count = db.Column(db.Integer)
+    active_admin_count = db.Column(db.Integer)
+    total_student_count = db.Column(db.Integer)
+    total_teacher_count = db.Column(db.Integer)
+    total_admin_count = db.Column(db.Integer)
+    total_user_count = db.Column(db.Integer)
+
+
+class VAdminCourseStatistics(db.Model):
+    """管理员课程统计视图 - 只读"""
+    __tablename__ = 'V_Admin_CourseStatistics'
+    __table_args__ = {'info': {'is_view': True}}
+    
+    course_id = db.Column(db.BigInteger, primary_key=True)
+    course_name = db.Column(db.String(100))
+    course_code = db.Column(db.String(50))
+    credit = db.Column(db.Numeric(3, 1))
+    hours = db.Column(db.Integer)
+    course_type = db.Column(db.String(50))
+    total_class_count = db.Column(db.Integer)
+    current_year_classes = db.Column(db.Integer)
+    active_class_count = db.Column(db.Integer)
+    total_enrollments = db.Column(db.Integer)
+    active_enrollments = db.Column(db.Integer)

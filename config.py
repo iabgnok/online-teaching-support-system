@@ -15,7 +15,7 @@ ASSIGNMENTS_FOLDER = os.path.join(UPLOAD_FOLDER, 'assignments')
 # - 'ODBC Driver 18 for SQL Server'
 DB_DRIVER = 'ODBC Driver 17 for SQL Server'
 DB_SERVER = 'wuhl\\SQLEXPRESS'
-DB_NAME = 'online_teaching_support_system'
+DB_NAME = 'online_teaching_support_system_db'
 
 # ==================== 配置基类 ====================
 

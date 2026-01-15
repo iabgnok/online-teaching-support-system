@@ -222,6 +222,7 @@
         <div class="content-section">
             <h2 class="section-title">📊 成绩管理</h2>
             <a href="{{ url_for('teacher_class_grades', class_id=teaching_class.class_id) }}" class="btn btn-primary">查看/管理成绩</a>
+            <a href="{{ url_for('teacher_class_grades_statistics', class_id=teaching_class.class_id) }}" class="btn btn-success" style="margin-left: 10px; background: #28a745;">📈 查看成绩统计</a>
         </div>
     </div>
 </body>

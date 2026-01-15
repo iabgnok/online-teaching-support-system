@@ -1,0 +1,2 @@
+username,password,real_name,phone,email,role,status,student_no,major,dept_name
+student201,123456,张三三,13900030201,zhangsan@stu.edu.cn,student,1,3124006001,计算机科学,物理学院

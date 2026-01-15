@@ -44,9 +44,13 @@
                 <p style="margin: 0;">已批改</p>
                 <h3 style="margin: 10px 0 0 0; font-size: 2em;">{{ graded_count }}</h3>
             </div>
+            <div class="stat-card" style="background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);">
+                <p style="margin: 0;">未提交</p>
+                <h3 style="margin: 10px 0 0 0; font-size: 2em;">{{ unsubmitted_count }}</h3>
+            </div>
             <div class="stat-card" style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);">
                 <p style="margin: 0;">提交率</p>
-                <h3 style="margin: 10px 0 0 0; font-size: 2em;">{{ '%.1f'|format((submitted_count / total_students * 100) if total_students > 0 else 0) }}%</h3>
+                <h3 style="margin: 10px 0 0 0; font-size: 2em;">{{ submission_rate }}%</h3>
             </div>
         </div>
         </div>
