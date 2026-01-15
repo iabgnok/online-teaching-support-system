@@ -5,6 +5,11 @@ from werkzeug.security import generate_password_hash, check_password_hash   # ty
 
 db = SQLAlchemy()
 
+def generate_next_id(model, id_field='id'):
+    """生成模型的下一个ID"""
+    max_id = db.session.query(db.func.max(getattr(model, id_field))).scalar()
+    return (max_id or 0) + 1
+
 # ==================== 基础数据模块 ====================
 
 class Department(db.Model):
@@ -328,6 +333,7 @@ class Grade(db.Model):
         """成绩是否已锁定"""
         return self.is_finalized
     
+
     def finalize(self, teacher_id, formula='hw*0.3+exam*0.5+eval*0.2'):
         """归档并锁定成绩"""
         from datetime import datetime
@@ -336,6 +342,142 @@ class Grade(db.Model):
         self.calculated_by = teacher_id
         self.calculated_at = datetime.now()
         self.calculation_formula = formula
+
+
+# ==================== Phase 1: 增强功能模块 ====================
+
+class Announcement(db.Model):
+    """系统公告与通知"""
+    __tablename__ = 'Announcement'
+
+    id = db.Column(db.BigInteger, primary_key=True)
+    title = db.Column(db.String(200), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    author_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'), nullable=False)
+    # Scope: 'global' (全站) 或 'class' (班级)
+    scope_type = db.Column(db.String(20), nullable=False, default='global', index=True) 
+    # 如果是班级通知，关联班级ID
+    target_class_id = db.Column(db.BigInteger, db.ForeignKey('TeachingClass.class_id'), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=func.now())
+    
+    # Relationships
+    author = db.relationship('Users', backref='announcements')
+    target_class = db.relationship('TeachingClass', backref='announcements')
+
+class Attendance(db.Model):
+    """考勤记录主表"""
+    __tablename__ = 'Attendance'
+
+    id = db.Column(db.BigInteger, primary_key=True)
+    class_id = db.Column(db.BigInteger, db.ForeignKey('TeachingClass.class_id'), nullable=False)
+    date = db.Column(db.Date, nullable=False)
+    created_at = db.Column(db.DateTime(timezone=True), default=func.now())
+    
+    # 签到模式字段
+    is_self_checkin = db.Column(db.Boolean, default=False) # 是否为学生自签模式
+    start_time = db.Column(db.DateTime(timezone=True))     # 签到开始时间
+    end_time = db.Column(db.DateTime(timezone=True))       # 正常签到截止时间 (超过此时间算迟到)
+    close_time = db.Column(db.DateTime(timezone=True))     # 签到关闭时间 (超过此时间无法签到)
+
+    # Relationships
+    teaching_class = db.relationship('TeachingClass', backref='attendances')
+    records = db.relationship('AttendanceRecord', backref='attendance', lazy='dynamic', cascade='all, delete-orphan')
+    
+    def get_status(self):
+        """获取当前签到状态"""
+        from datetime import datetime
+        now = datetime.now()
+        if not self.is_self_checkin:
+            return 'manual' # 手动录入
+        if now <= self.end_time:
+            return 'active' # 正在进行
+        elif now <= self.close_time:
+            return 'late'   # 迟到阶段
+        else:
+            return 'closed' # 已结束
+
+class AttendanceRecord(db.Model):
+    """学生考勤详情表"""
+    __tablename__ = 'AttendanceRecord'
+    
+    id = db.Column(db.BigInteger, primary_key=True)
+    attendance_id = db.Column(db.BigInteger, db.ForeignKey('Attendance.id'), nullable=False)
+    student_id = db.Column(db.BigInteger, db.ForeignKey('Student.student_id'), nullable=False)
+    status = db.Column(db.String(20), nullable=False, default='present') # 'present', 'absent', 'late', 'leave'
+    remarks = db.Column(db.String(200)) # 备注，例如迟到原因
+
+    # Relationship
+    student = db.relationship('Student', backref='attendance_records')
+
+    __table_args__ = (
+        db.UniqueConstraint('attendance_id', 'student_id', name='UK_AttendanceRecord_Student'),
+    )
+
+
+# ==================== Phase 2: 互动与沟通模块 ====================
+
+class ForumPost(db.Model):
+    """课程讨论区帖子"""
+    __tablename__ = 'ForumPost'
+
+    id = db.Column(db.BigInteger, primary_key=True)
+    class_id = db.Column(db.BigInteger, db.ForeignKey('TeachingClass.class_id'), nullable=False)
+    title = db.Column(db.String(200), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    author_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'), nullable=False)
+    created_at = db.Column(db.DateTime(timezone=True), default=func.now())
+    updated_at = db.Column(db.DateTime(timezone=True), default=func.now(), onupdate=func.now())
+    
+    # 状态字段
+    is_pinned = db.Column(db.Boolean, default=False) # 置顶
+    is_solved = db.Column(db.Boolean, default=False) # 已解决 (如果是提问)
+    view_count = db.Column(db.Integer, default=0)
+    
+    # 附件字段
+    file_name = db.Column(db.String(255))
+    file_path = db.Column(db.String(500))
+
+    # Relationships
+    teaching_class = db.relationship('TeachingClass', backref='forum_posts')
+    author = db.relationship('Users', backref='posts')
+    comments = db.relationship('ForumComment', backref='post', lazy='dynamic', cascade='all, delete-orphan')
+
+
+class ForumComment(db.Model):
+    """帖子回复/评论"""
+    __tablename__ = 'ForumComment'
+
+    id = db.Column(db.BigInteger, primary_key=True)
+    post_id = db.Column(db.BigInteger, db.ForeignKey('ForumPost.id'), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    author_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'), nullable=False)
+    parent_id = db.Column(db.BigInteger, db.ForeignKey('ForumComment.id'), nullable=True) # 支持楼中楼
+    created_at = db.Column(db.DateTime(timezone=True), default=func.now())
+    
+    is_accepted_answer = db.Column(db.Boolean, default=False) # 标记为标准/最佳答案
+
+    # Relationships
+    author = db.relationship('Users', backref='comments')
+    replies = db.relationship('ForumComment', backref=db.backref('parent', remote_side=[id]), lazy='dynamic')
+
+
+class Message(db.Model):
+    """站内信 (私信)"""
+    __tablename__ = 'Message'
+
+    id = db.Column(db.BigInteger, primary_key=True)
+    sender_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'), nullable=False)
+    recipient_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime(timezone=True), default=func.now())
+    read_at = db.Column(db.DateTime(timezone=True), nullable=True) # 读取时间，为空则未读
+    
+    is_deleted_by_sender = db.Column(db.Boolean, default=False)
+    is_deleted_by_recipient = db.Column(db.Boolean, default=False)
+
+    # Relationships
+    sender = db.relationship('Users', foreign_keys=[sender_id], backref='sent_messages')
+    recipient = db.relationship('Users', foreign_keys=[recipient_id], backref='received_messages')
 
 
 # ==================== 子模式视图（只读） ====================

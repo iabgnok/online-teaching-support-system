@@ -32,3 +32,6 @@ uploads/
 
 # 日志文件
 *.log
+
+# Node modules
+frontend/node_modules/

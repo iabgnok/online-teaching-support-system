@@ -157,6 +157,24 @@
             <p class="welcome-text">欢迎，{{ teacher.name }}！您可以在这里管理您的教学班级和课程。</p>
         </div>
 
+        <!-- 📢 学校公告 (Phase 1) -->
+        {% if global_announcements %}
+        <div class="info-card" style="border-left: 5px solid #e67e22; background: #fffcf5;">
+            <h3 style="color: #d35400; margin-bottom: 15px;">📢 学校公告</h3>
+            <ul style="list-style: none; padding: 0;">
+                {% for announcement in global_announcements %}
+                <li style="margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px dashed #e67e22;">
+                    <div style="font-weight: bold; color: #d35400; font-size: 1.1em;">{{ announcement.title }}</div>
+                    <div style="color: #666; margin-top: 5px; line-height: 1.5;">{{ announcement.content }}</div>
+                    <div style="color: #999; font-size: 0.85em; margin-top: 5px;">
+                        📅 {{ announcement.created_at.strftime('%Y-%m-%d %H:%M') }}
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}

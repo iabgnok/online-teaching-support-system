@@ -31,6 +31,9 @@
 
         <div class="content-section">
             <h2 class="section-title">👥 学生名单 ({{ students|length }} 人)</h2>
+            <div style="margin-bottom: 15px;">
+                 <a href="{{ url_for('teacher_attendance_list', class_id=teaching_class.class_id) }}" class="btn btn-primary">📅 考勤管理</a>
+            </div>
             {% if students %}
             <table>
                 <thead>

@@ -1,0 +1,98 @@
+{% from "macros.html" import dashboard_nav, unified_styles, page_header %}
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>考勤记录列表 - {{ teaching_class.course.course_name }}</title>
+    {{ unified_styles() }}
+    <style>
+        .rate-high { color: #28a745; font-weight: bold; }
+        .rate-mid { color: #ffc107; font-weight: bold; }
+        .rate-low { color: #dc3545; font-weight: bold; }
+        
+        .stat-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            margin-right: 5px;
+            background: #eee;
+            color: #555;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        {{ dashboard_nav('teacher') }}
+        
+        <div class="header" style="margin-bottom: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <a href="{{ url_for('teacher_class_detail', class_id=teaching_class.class_id) }}" style="text-decoration: none; color: #3498db; font-size: 0.9em;">&larr; 返回班级详情</a>
+                    <h1>📅 考勤管理 - {{ teaching_class.class_name }}</h1>
+                </div>
+                <div>
+                    <a href="{{ url_for('teacher_create_attendance', class_id=teaching_class.class_id) }}" class="btn btn-primary">➕ 新建考勤</a>
+                </div>
+            </div>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="content-section">
+            {% if attendances %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>日期</th>
+                        <th>出勤率</th>
+                        <th>统计详情</th>
+                        <th>创建时间</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for att in attendances %}
+                    <tr>
+                        <td style="font-weight: bold;">{{ att.date.strftime('%Y-%m-%d') }}</td>
+                        <td>
+                            {% if att.attendance_rate >= 90 %}
+                                <span class="rate-high">{{ att.attendance_rate }}%</span>
+                            {% elif att.attendance_rate >= 70 %}
+                                <span class="rate-mid">{{ att.attendance_rate }}%</span>
+                            {% else %}
+                                <span class="rate-low">{{ att.attendance_rate }}%</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="stat-badge" style="background:#e8f5e9; color:#2e7d32">实到: {{ att.present_count }}</span>
+                            <span class="stat-badge" style="background:#ffebee; color:#c62828">缺席: {{ att.absent_count }}</span>
+                            <span class="stat-badge" style="background:#fff3e0; color:#ef6c00">迟到: {{ att.late_count }}</span>
+                            <span class="stat-badge" style="background:#e3f2fd; color:#1565c0">请假: {{ att.leave_count }}</span>
+                        </td>
+                        <td>{{ att.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                        <td>
+                            <a href="{{ url_for('teacher_attendance_detail', class_id=teaching_class.class_id, attendance_id=att.id) }}" class="btn btn-mini btn-primary">查看详情</a>
+                            <form action="{{ url_for('teacher_delete_attendance', class_id=teaching_class.class_id, attendance_id=att.id) }}" method="POST" style="display:inline;" onsubmit="return confirm('确定要删除这条考勤记录吗？');">
+                                <button type="submit" class="btn btn-mini btn-danger">删除</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div style="text-align: center; padding: 40px; color: #999;">
+                <p>暂无考勤记录，点击右上角"新建考勤"开始记录。</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>

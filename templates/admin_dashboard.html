@@ -141,6 +141,52 @@
             <p class="welcome-text">欢迎，{{ user.real_name }}！您可以通过以下功能模块管理整个教学系统。</p>
         </div>
 
+        <!-- 📢 系统公告管理 (Phase 1) -->
+        <div class="section management">
+            <h2 class="section-title">
+                <span class="icon">📢</span>
+                系统公告管理
+            </h2>
+            
+            <div style="background: #fdfdfd; padding: 20px; border-radius: 8px; border: 1px solid #eee; margin-bottom: 25px;">
+                <h3 style="margin-top: 0; font-size: 1.1em; color: #2980b9;">✏️ 发布新公告</h3>
+                <form action="{{ url_for('create_announcement') }}" method="POST" style="display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-start;">
+                    <input type="hidden" name="scope_type" value="global">
+                    <div style="flex: 1; min-width: 250px;">
+                        <input type="text" name="title" placeholder="公告标题" required style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; margin-bottom: 10px;">
+                        <textarea name="content" placeholder="公告内容" required style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; min-height: 80px; resize: vertical;"></textarea>
+                    </div>
+                    <button type="submit" style="background: #27ae60; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; height: 40px; font-weight: bold;">发布公告</button>
+                </form>
+            </div>
+
+            <h3 style="font-size: 1.1em; color: #7f8c8d; margin-bottom: 15px;">📜 最新公告列表</h3>
+            {% if announcements %}
+                <div style="max-height: 400px; overflow-y: auto; border: 1px solid #eee; border-radius: 8px; background: white;">
+                    {% for announcement in announcements %}
+                    <div style="padding: 15px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: flex-start; transition: background 0.2s;">
+                        <div style="flex: 1;">
+                            <div style="font-weight: bold; color: #2c3e50; font-size: 1.05em; margin-bottom: 5px;">{{ announcement.title }}</div>
+                            <div style="color: #555; font-size: 0.95em; white-space: pre-wrap; line-height: 1.5;">{{ announcement.content }}</div>
+                            <div style="color: #95a5a6; font-size: 0.85em; margin-top: 8px;">
+                                <span style="margin-right: 15px;">📅 {{ announcement.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+                                <span>👤 {{ announcement.author.real_name if announcement.author else 'Unknown' }}</span>
+                            </div>
+                        </div>
+                        <form action="{{ url_for('delete_announcement', announcement_id=announcement.id) }}" method="POST" onsubmit="return confirm('确定要删除此公告吗？');" style="margin-left: 15px;">
+                            <button type="submit" style="color: #e74c3c; background: none; border: 1px solid #fadbd8; border-radius: 4px; cursor: pointer; padding: 5px 10px; font-size: 0.9em;">删除</button>
+                        </form>
+                    </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div style="padding: 30px; text-align: center; color: #95a5a6; background: #f9f9f9; border-radius: 8px; border: 1px dashed #ddd;">
+                    暂无发布的系统公告
+                </div>
+            {% endif %}
+        </div>
+
+
         <!-- 信息管理类 -->
         <div class="section management">
             <h2 class="section-title">

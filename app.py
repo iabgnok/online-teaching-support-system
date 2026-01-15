@@ -13,16 +13,21 @@ import os
 from werkzeug.utils import secure_filename  
 from models import (
     Users, Admin, Student, Teacher, Course, TeachingClass, StudentClass, TeacherClass, 
-    Assignment, Submission, Grade, Material, Department, db,
+    Assignment, Submission, Grade, Material, Department, Announcement, Attendance, AttendanceRecord, db,
     # 视图模型
     VStudentMyCourses, VStudentMyAssignments, VStudentMyGrades,
     VTeacherMyClasses, VTeacherStudentList, VTeacherSubmissionStatus,
-    VAdminUserStatistics, VAdminCourseStatistics
+    VAdminUserStatistics, VAdminCourseStatistics,
+    generate_next_id # Import utility function
 )
 
 # ==================== 应用初始化 ====================
 app = Flask(__name__)
 app.config.from_object(DevelopmentConfig)
+
+# ==================== Blueprint Registration ====================
+from api.v1 import api_v1
+app.register_blueprint(api_v1)
 
 # ==================== 扩展初始化 ====================
 db.init_app(app)
@@ -36,10 +41,7 @@ os.makedirs(app.config['ASSIGNMENTS_FOLDER'], exist_ok=True)
 
 # ----------------------- 辅助函数 -----------------------
 
-def generate_next_id(model, id_field='id'):
-    """生成模型的下一个ID"""
-    max_id = db.session.query(db.func.max(getattr(model, id_field))).scalar()
-    return (max_id or 0) + 1
+# generate_next_id check moved to models.py
 
 def allowed_file(filename):
     """检查文件扩展名是否允许"""
@@ -322,6 +324,140 @@ def index():
     return redirect(url_for(dashboard))
 
 
+# ==================== Phase 1: 公告管理模块 ====================
+
+@app.route('/announcement/create', methods=['POST'])
+@login_required
+def create_announcement():
+    """发布公告"""
+    title = request.form.get('title')
+    content = request.form.get('content')
+    scope_type = request.form.get('scope_type') # 'global' or 'class'
+    target_class_id = request.form.get('target_class_id')
+
+    if not title or not content:
+        flash('标题和内容不能为空。', 'danger')
+        return redirect(request.referrer)
+
+    if scope_type == 'global':
+        if current_user.role != 'admin':
+            flash('只有管理员可以发布全站公告。', 'danger')
+            return redirect(request.referrer)
+        target_class_id = None
+    elif scope_type == 'class':
+        # 教师或管理员都可以发布班级通知
+        if current_user.role not in ['teacher', 'admin']:
+            flash('只有教师或管理员可以发布班级通知。', 'danger')
+            return redirect(request.referrer)
+        if not target_class_id:
+             flash('必须指定目标班级。', 'danger')
+             return redirect(request.referrer)
+        
+        # 验证教师是否教授该班级 (如果是管理员则跳过此检查)
+        if current_user.role == 'teacher':
+             teacher = current_user.teacher_profile
+             if teacher:
+                 is_teaching = TeacherClass.query.filter_by(teacher_id=teacher.teacher_id, class_id=target_class_id).first()
+                 if not is_teaching:
+                     flash('您不是该班级的任课教师。', 'danger')
+                     return redirect(request.referrer)
+    else:
+        flash('无效的公告范围。', 'danger')
+        return redirect(request.referrer)
+
+    announcement = Announcement(
+        id=generate_next_id(Announcement),
+        title=title,
+        content=content,
+        author_id=current_user.user_id,
+        scope_type=scope_type,
+        target_class_id=target_class_id
+    )
+    db.session.add(announcement)
+    db.session.commit()
+    flash('公告发布成功！', 'success')
+    return redirect(request.referrer)
+
+@app.route('/announcement/delete/<int:announcement_id>', methods=['POST'])
+@login_required
+def delete_announcement(announcement_id):
+    """删除公告"""
+    announcement = db.session.get(Announcement, announcement_id)
+    if not announcement:
+        flash('公告不存在。', 'danger')
+        return redirect(request.referrer)
+    
+    # 权限检查
+    if current_user.role == 'admin':
+        pass # 管理员可以删除任何公告
+    elif current_user.user_id == announcement.author_id:
+        pass # 作者可以删除自己的公告
+    else:
+        flash('没有权限删除此公告。', 'danger')
+        return redirect(request.referrer)
+    
+    db.session.delete(announcement)
+    db.session.commit()
+    flash('公告已删除。', 'success')
+    return redirect(request.referrer)
+
+
+
+@app.route('/student/checkin', methods=['POST'])
+@login_required
+@role_required('student')
+def student_checkin():
+    """学生签到接口"""
+    attendance_id = request.form.get('attendance_id')
+    student = current_user.student_profile
+    
+    attendance = db.session.get(Attendance, attendance_id)
+    if not attendance:
+        flash('考勤活动不存在', 'danger')
+        return redirect(url_for('student_dashboard'))
+    
+    # 验证学生是否在班级中
+    sc = StudentClass.query.filter_by(student_id=student.student_id, class_id=attendance.class_id).first()
+    if not sc:
+        flash('您不在此班级中', 'danger')
+        return redirect(url_for('student_dashboard'))
+
+    # 时间检查
+    now = datetime.now()
+    if now > attendance.close_time:
+        flash('签到通道已关闭，您已缺席。', 'danger')
+        return redirect(url_for('student_dashboard'))
+    
+    # 查找记录
+    record = AttendanceRecord.query.filter_by(attendance_id=attendance.id, student_id=student.student_id).first()
+    if not record:
+        # 如果没有记录，创建一条 (虽然应该在创建时就有了)
+        record = AttendanceRecord(
+            id=generate_next_id(AttendanceRecord),
+            attendance_id=attendance.id,
+            student_id=student.student_id,
+            status='absent'
+        )
+        db.session.add(record)
+
+    if record.status in ['present', 'late', 'leave']:
+        flash('您已经签到过了。', 'info')
+        return redirect(url_for('student_dashboard'))
+    
+    # 判定状态
+    if now <= attendance.end_time:
+        record.status = 'present'
+        record.remarks = '正常签到'
+        flash('✅ 签到成功！', 'success')
+    else:
+        record.status = 'late'
+        record.remarks = '迟到签到'
+        flash('⚠️ 您已迟到，但签到成功。', 'warning')
+        
+    db.session.commit()
+    return redirect(url_for('student_dashboard'))
+
+
 # ==================== 管理员路由 ====================
 
 @app.route('/admin_dashboard')
@@ -331,10 +467,15 @@ def admin_dashboard():
     """管理员主页"""
     admin = current_user.admin_profile
     permission_level = admin.permission_level if admin else 3
+    
+    # 获取最新的全局公告
+    announcements = Announcement.query.filter_by(scope_type='global').order_by(Announcement.created_at.desc()).limit(10).all()
+    
     return render_template('admin_dashboard.html', 
                          user=current_user, 
                          title='管理员主页',
-                         permission_level=permission_level)
+                         permission_level=permission_level,
+                         announcements=announcements)
 
 
 @app.route('/admin/users', methods=['GET', 'POST'])
@@ -1606,12 +1747,60 @@ def student_dashboard():
         'graded_courses': len(grades_list)
     }
     
+    # 获取公告 (New)
+    global_announcements = Announcement.query.filter_by(scope_type='global').order_by(Announcement.created_at.desc()).limit(5).all()
+    
+    class_ids = [c.class_id for c in my_courses]
+    class_announcements = []
+    
+    # 获取待签到的活动
+    active_attendance = []
+    
+    if class_ids:
+        class_announcements = Announcement.query.filter(
+            Announcement.scope_type == 'class',
+            Announcement.target_class_id.in_(class_ids)
+        ).order_by(Announcement.created_at.desc()).limit(10).all()
+        
+        # 查找正在进行的自签到活动
+        now = datetime.now()
+        # 查找该学生相关班级的、是自签模式的、尚未完全关闭的考勤
+        # 且该学生尚未签到(status='absent')
+        
+        candidates = Attendance.query.filter(
+            Attendance.class_id.in_(class_ids),
+            Attendance.is_self_checkin == True,
+            Attendance.close_time > now
+        ).all()
+        
+        for cand in candidates:
+            # 检查学生是否已签到
+            record = AttendanceRecord.query.filter_by(
+                attendance_id=cand.id, 
+                student_id=student.student_id
+            ).first()
+            
+            # 如果记录存在且状态为'absent' (未签到), 则加入列表
+            if record and record.status == 'absent':
+                status_str = 'active' if now <= cand.end_time else 'late'
+                active_attendance.append({
+                    'id': cand.id,
+                    'course_name': cand.teaching_class.course.course_name,
+                    'class_name': cand.teaching_class.class_name,
+                    'end_time': cand.end_time,
+                    'close_time': cand.close_time,
+                    'current_status': status_str
+                })
+    
     return render_template('student_dashboard.html', 
                          user=current_user,
                          student=student,
                          courses_info=courses_info,
                          stats=stats,
-                         title='学生仪表板')
+                         title='学生仪表板',
+                         global_announcements=global_announcements,
+                         class_announcements=class_announcements,
+                         active_attendance=active_attendance)
 
 
 @app.route('/student/class/<int:class_id>')
@@ -1888,12 +2077,16 @@ def teacher_dashboard():
         'total_pending_grading': total_pending_grading
     }
     
+    # 获取公告 (New)
+    global_announcements = Announcement.query.filter_by(scope_type='global').order_by(Announcement.created_at.desc()).limit(5).all()
+    
     return render_template('teacher_dashboard.html', 
                          user=current_user, 
                          teacher=teacher,
                          classes_info=classes_info,
                          stats=stats,
-                         title='教师仪表板')
+                         title='教师仪表板',
+                         global_announcements=global_announcements)
 
 
 @app.route('/teacher/class/<int:class_id>')
@@ -2040,6 +2233,197 @@ def teacher_create_assignment(class_id):
                          class_id=class_id,
                          preset_type=preset_type,
                          title='发布作业/考试')
+
+
+# ==================== Phase 1: 考勤管理模块 ====================
+
+@app.route('/teacher/class/<int:class_id>/attendance')
+@login_required
+@role_required('teacher')
+def teacher_attendance_list(class_id):
+    """考勤记录列表"""
+    teacher = current_user.teacher_profile
+    
+    # 验证该教师是否教这个班
+    tc = TeacherClass.query.filter_by(teacher_id=teacher.teacher_id, class_id=class_id).first()
+    if not tc:
+        flash('您没有权限管理此班级的考勤。', 'danger')
+        return redirect(url_for('teacher_dashboard'))
+    
+    teaching_class = db.session.get(TeachingClass, class_id)
+    attendances = Attendance.query.filter_by(class_id=class_id).order_by(Attendance.date.desc()).all()
+    
+    # 获取每个考勤记录的统计信息
+    for att in attendances:
+        att.present_count = AttendanceRecord.query.filter_by(attendance_id=att.id, status='present').count()
+        att.absent_count = AttendanceRecord.query.filter_by(attendance_id=att.id, status='absent').count()
+        att.late_count = AttendanceRecord.query.filter_by(attendance_id=att.id, status='late').count()
+        att.leave_count = AttendanceRecord.query.filter_by(attendance_id=att.id, status='leave').count()
+        att.total_students = att.records.count()
+        att.attendance_rate = 0
+        if att.total_students > 0:
+            att.attendance_rate = round((att.present_count / att.total_students) * 100, 1)
+
+    return render_template('teacher_attendance_list.html', 
+                         teaching_class=teaching_class,
+                         attendances=attendances,
+                         title='考勤管理')
+
+@app.route('/teacher/class/<int:class_id>/attendance/create', methods=['GET', 'POST'])
+@login_required
+@role_required('teacher')
+def teacher_create_attendance(class_id):
+    """新建考勤（支持手动录入和学生自签）"""
+    teacher = current_user.teacher_profile
+    
+    # 验证权限
+    tc = TeacherClass.query.filter_by(teacher_id=teacher.teacher_id, class_id=class_id).first()
+    if not tc:
+        flash('您没有权限管理此班级。', 'danger')
+        return redirect(url_for('teacher_dashboard'))
+    
+    teaching_class = db.session.get(TeachingClass, class_id)
+    
+    if request.method == 'POST':
+        mode = request.form.get('mode', 'manual') # 'manual' or 'self'
+        date_str = request.form.get('date')
+        attendance_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        
+        # 检查是否已存在当日考勤 (Only warn if it conflicts heavily or just create another session?)
+        # Let's simple warn but allow if users really want multiple sessions in one day (e.g. morning/afternoon)
+        # But for simplicity, let's keep the existing check but maybe more flexible later.
+        existing = Attendance.query.filter_by(class_id=class_id, date=attendance_date).first()
+        if existing:
+             # 如果已经存在一个自签到的session且正在进行，可以阻止，否则提醒
+             if existing.is_self_checkin and existing.get_status() == 'active':
+                  flash(f'{date_str} 已有一个正在进行的签到活动。', 'warning')
+                  return redirect(url_for('teacher_attendance_list', class_id=class_id))
+        
+        # 创建考勤主记录
+        from datetime import timedelta
+        
+        attendance = Attendance(
+            id=generate_next_id(Attendance),
+            class_id=class_id,
+            date=attendance_date,
+            is_self_checkin=(mode == 'self')
+        )
+        
+        if mode == 'self':
+            normal_minutes = int(request.form.get('normal_minutes', 10))
+            late_minutes = int(request.form.get('late_minutes', 20)) # relative to start
+            
+            # Late minutes is usually "additional time" or "total time until close"?
+            # User said: "Beyond this time (normal), it is absent... no, wait. 'After attendance time (normal), how long until absent?'"
+            # So: Start --(normal)--> End --(late_window)--> Close
+            
+            now = datetime.now()
+            attendance.start_time = now
+            attendance.end_time = now + timedelta(minutes=normal_minutes)
+            # The user asked: "System sets a time, after attendance time, how long... is absent".
+            # So late_window is the duration AFTER normal time.
+            attendance.close_time = attendance.end_time + timedelta(minutes=late_minutes)
+        
+        db.session.add(attendance)
+        db.session.flush() # 获取ID
+        
+        # 创建学生记录
+        students = StudentClass.query.filter_by(class_id=class_id, status=1).all()
+        for sc in students:
+            if mode == 'manual':
+                # 手动模式：从表单获取状态
+                status = request.form.get(f'status_{sc.student_id}', 'present')
+                remarks = request.form.get(f'remarks_{sc.student_id}', '')
+            else:
+                # 自签模式：初始状态为缺席 (等待签到)
+                status = 'absent' 
+                remarks = '未签到'
+
+            record = AttendanceRecord(
+                id=generate_next_id(AttendanceRecord),
+                attendance_id=attendance.id,
+                student_id=sc.student_id,
+                status=status,
+                remarks=remarks
+            )
+            db.session.add(record)
+            
+        db.session.commit()
+        
+        if mode == 'self':
+            flash(f'发起签到成功！学生可在 {attendance.close_time.strftime("%H:%M")} 前签到。', 'success')
+        else:
+            flash('考勤记录已保存！', 'success')
+            
+        return redirect(url_for('teacher_attendance_list', class_id=class_id))
+    
+    # 获取学生名单用于表单
+    students = StudentClass.query.filter_by(class_id=class_id, status=1).join(Student).join(Users).order_by(Student.student_no).all()
+    today = datetime.now().strftime('%Y-%m-%d')
+    
+    return render_template('teacher_create_attendance.html', 
+                         teaching_class=teaching_class,
+                         students=students,
+                         today=today,
+                         title='新建考勤')
+
+
+@app.route('/teacher/class/<int:class_id>/attendance/<int:attendance_id>', methods=['GET', 'POST'])
+@login_required
+@role_required('teacher')
+def teacher_attendance_detail(class_id, attendance_id):
+    """查看/修改考勤详情"""
+    teacher = current_user.teacher_profile
+    
+    attendance = db.session.get(Attendance, attendance_id)
+    if not attendance or attendance.class_id != class_id:
+        flash('考勤记录不存在。', 'danger')
+        return redirect(url_for('teacher_attendance_list', class_id=class_id))
+        
+    teaching_class = db.session.get(TeachingClass, class_id)
+    
+    if request.method == 'POST':
+        records = attendance.records.all()
+        for record in records:
+            status = request.form.get(f'status_{record.student_id}')
+            remarks = request.form.get(f'remarks_{record.student_id}')
+            if status:
+                record.status = status
+            if remarks is not None:
+                record.remarks = remarks
+        
+        db.session.commit()
+        flash('考勤记录已更新！', 'success')
+        return redirect(url_for('teacher_attendance_list', class_id=class_id))
+
+    # 获取包含学生信息的记录列表
+    records = db.session.query(AttendanceRecord, Student, Users).\
+        join(Student, AttendanceRecord.student_id == Student.student_id).\
+        join(Users, Student.user_id == Users.user_id).\
+        filter(AttendanceRecord.attendance_id == attendance_id).\
+        order_by(Student.student_no).all()
+        
+    return render_template('teacher_attendance_detail.html',
+                         teaching_class=teaching_class,
+                         attendance=attendance,
+                         records=records,
+                         title='考勤详情')
+
+
+@app.route('/teacher/class/<int:class_id>/attendance/delete/<int:attendance_id>', methods=['POST'])
+@login_required
+@role_required('teacher')
+def teacher_delete_attendance(class_id, attendance_id):
+    """删除考勤记录"""
+    attendance = db.session.get(Attendance, attendance_id)
+    if attendance and attendance.class_id == class_id:
+        db.session.delete(attendance)
+        db.session.commit()
+        flash('考勤记录已删除。', 'success')
+    else:
+        flash('删除失败。', 'danger')
+        
+    return redirect(url_for('teacher_attendance_list', class_id=class_id))
 
 
 @app.route('/teacher/assignment/<int:assignment_id>')
@@ -3906,4 +4290,11 @@ if __name__ == '__main__':
         # ------------------------------------
     
     # 启动Flask应用
+    print("\n" + "="*60)
+    print(" 🚀 后端服务已启动 (Backend running on port 5000)")
+    print(" 🌐 前端访问地址 (Vue Frontend):")
+    print("    👉 http://localhost:5174 (当前活跃)")
+    print("    👉 http://localhost:5173 (备用)")
+    print("="*60 + "\n")
+
     app.run(debug=True)

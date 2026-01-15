@@ -268,6 +268,78 @@
             <p class="welcome-text">欢迎，{{ student.name }}！查看您的课程、作业和成绩。</p>
         </div>
         
+        <!-- � 签到提醒 (Phase 1+) -->
+        {% if active_attendance %}
+        <div class="section" style="background: #fff3cd; border: 1px solid #ffeeba; border-left: 5px solid #ffc107;">
+             <h2 class="section-title" style="margin-bottom: 15px; font-size: 1.3em; border-bottom-color: #ffc107;">⏰ 正在进行的签到</h2>
+             <div style="display: grid; gap: 15px;">
+                {% for att in active_attendance %}
+                <div style="background: white; padding: 15px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #eee;">
+                    <div>
+                        <div style="font-weight: bold; font-size: 1.1em;">{{ att.course_name }} <span style="font-size: 0.8em; color: #666;">{{ att.class_name }}</span></div>
+                        <div style="font-size: 0.9em; color: #555; margin-top: 5px;">
+                            {% if att.current_status == 'active' %}
+                                <span style="color: #28a745; font-weight: bold;">正常签到进行中</span> - 截止时间: {{ att.end_time.strftime('%H:%M') }}
+                            {% else %}
+                                <span style="color: #dc3545; font-weight: bold;">⚠️ 已进入迟到时段</span> - 截止时间: {{ att.close_time.strftime('%H:%M') }}
+                            {% endif %}
+                        </div>
+                    </div>
+                    <form action="{{ url_for('student_checkin') }}" method="POST">
+                        <input type="hidden" name="attendance_id" value="{{ att.id }}">
+                        <button type="submit" class="btn btn-primary" style="background: #ffc107; color: black; border: none; font-weight: bold;">
+                            📍 立即签到
+                        </button>
+                    </form>
+                </div>
+                {% endfor %}
+             </div>
+        </div>
+        {% endif %}
+
+        <!-- �📢 公告通知 (Phase 1) -->
+        {% if global_announcements or class_announcements %}
+        <div class="section" style="background: #fff; border-left: 5px solid #3498db;">
+            <h2 class="section-title" style="margin-bottom: 15px; font-size: 1.3em;">📢 最新通知</h2>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
+                {% if global_announcements %}
+                <div>
+                    <h3 style="color: #e67e22; font-size: 1.1em; margin-bottom: 10px;">🏫 学校公告</h3>
+                    <ul style="list-style: none; padding: 0;">
+                        {% for announcement in global_announcements %}
+                        <li style="margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px dashed #eee;">
+                            <div style="font-weight: bold; color: #2c3e50;">{{ announcement.title }}</div>
+                            <div style="font-size: 0.9em; color: #555; margin-top: 3px;">{{ announcement.content }}</div>
+                            <div style="font-size: 0.8em; color: #999; margin-top: 5px;">{{ announcement.created_at.strftime('%m-%d %H:%M') }}</div>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+                
+                {% if class_announcements %}
+                <div>
+                    <h3 style="color: #27ae60; font-size: 1.1em; margin-bottom: 10px;">📚 课程通知</h3>
+                    <ul style="list-style: none; padding: 0;">
+                        {% for announcement in class_announcements %}
+                        <li style="margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px dashed #eee;">
+                            <div style="font-weight: bold; color: #2c3e50;">
+                                <span style="background: #e8f8f5; color: #27ae60; padding: 2px 6px; border-radius: 4px; font-size: 0.8em; margin-right: 5px;">{{ announcement.target_class.course.course_name }}</span>
+                                {{ announcement.title }}
+                            </div>
+                            <div style="font-size: 0.9em; color: #555; margin-top: 3px;">{{ announcement.content }}</div>
+                            <div style="font-size: 0.8em; color: #999; margin-top: 5px;">
+                                {{ announcement.created_at.strftime('%m-%d %H:%M') }} · {{ announcement.author.real_name }}
+                            </div>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
         <div class="info-card">
             <h3>👤 个人信息</h3>
             <p><strong>学号：</strong>{{ student.student_no }}</p>
