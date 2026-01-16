@@ -1,5 +1,5 @@
 from flask import Blueprint, jsonify, request
-from .auth import login_required, current_user
+from flask_login import login_required, current_user
 from models import db, Assignment, Submission, TeacherClass, StudentClass, Student, generate_next_id
 from datetime import datetime
 

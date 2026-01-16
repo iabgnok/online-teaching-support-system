@@ -24,6 +24,8 @@ import MyGrades from '../views/student/MyGrades.vue'
 import AdminDashboard from '../views/admin/AdminDashboard.vue'
 import UserManagement from '../views/admin/UserManagement.vue'
 import QueryPage from '../views/admin/QueryPage.vue'
+import PermissionManagement from '../views/admin/PermissionManagement.vue'
+import ForumManagement from '../views/admin/ForumManagement.vue'
 
 // Common Views
 import Profile from '../views/Profile.vue'
@@ -63,7 +65,9 @@ const routes = [
       children: [
           { path: 'dashboard', component: AdminDashboard },
           { path: 'users', component: UserManagement },
-          { path: 'query', component: QueryPage }
+          { path: 'query', component: QueryPage },
+          { path: 'permissions', component: PermissionManagement },
+          { path: 'forum-management', component: ForumManagement }
       ]
   }
 ]

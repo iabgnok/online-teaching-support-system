@@ -1,12 +1,23 @@
 from flask import Blueprint, jsonify, request
-from flask_login import login_required, current_user
+from flask_login import current_user
+from functools import wraps
 from models import Attendance, AttendanceRecord, StudentClass, TeacherClass, db, generate_next_id, Student, Users
 from datetime import datetime, date
 
 attendance_bp = Blueprint('attendance', __name__)
 
+
+def api_login_required(f):
+    """检查用户是否登录，如果未登录则返回 401"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not current_user.is_authenticated:
+            return jsonify({'error': 'Authentication required'}), 401
+        return f(*args, **kwargs)
+    return decorated_function
+
 @attendance_bp.route('/class/<int:class_id>', methods=['GET'])
-@login_required
+@api_login_required
 def get_class_attendance_list(class_id):
     """Get all attendance sessions for a class (Teacher or Student of that class)"""
     # Simply listing dates
@@ -38,7 +49,7 @@ def get_class_attendance_list(class_id):
     return jsonify(data)
 
 @attendance_bp.route('/class/<int:class_id>', methods=['POST'])
-@login_required
+@api_login_required
 def create_attendance(class_id):
     """Create a new attendance session and init records for all students"""
     if current_user.role != 'teacher':
@@ -112,7 +123,7 @@ def create_attendance(class_id):
         return jsonify({'error': f'Database error: {str(e)}'}), 500
 
 @attendance_bp.route('/<int:attendance_id>', methods=['GET'])
-@login_required
+@api_login_required
 def get_attendance_detail(attendance_id):
     """Get student list and status for an attendance session"""
     att = Attendance.query.get_or_404(attendance_id)
@@ -143,7 +154,7 @@ def get_attendance_detail(attendance_id):
     })
 
 @attendance_bp.route('/<int:attendance_id>/records', methods=['PUT'])
-@login_required
+@api_login_required
 def update_attendance_records(attendance_id):
     """Batch update records"""
     if current_user.role != 'teacher':
@@ -163,7 +174,7 @@ def update_attendance_records(attendance_id):
     return jsonify({'message': 'Updated'})
 
 @attendance_bp.route('/class/<int:class_id>/me', methods=['GET'])
-@login_required
+@api_login_required
 def get_student_my_attendance(class_id):
     """Get current student's attendance records for a class"""
     if current_user.role != 'student':
@@ -217,7 +228,7 @@ def get_student_my_attendance(class_id):
 
 
 @attendance_bp.route('/<int:attendance_id>/checkin', methods=['POST'])
-@login_required
+@api_login_required
 def student_checkin(attendance_id):
     """Student self check-in"""
     if current_user.role != 'student':
@@ -251,7 +262,7 @@ def student_checkin(attendance_id):
 
 
 @attendance_bp.route('/<int:attendance_id>', methods=['DELETE'])
-@login_required
+@api_login_required
 def delete_attendance(attendance_id):
     """Delete an attendance session and all its records"""
     if current_user.role != 'teacher':

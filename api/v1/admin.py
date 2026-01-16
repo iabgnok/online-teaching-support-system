@@ -69,7 +69,7 @@ def get_dashboard_stats():
         # 课程统计
         course_stats = VAdminCourseStatistics.query.all()
         total_courses = len(course_stats)
-        total_teaching_classes = sum(s.teaching_class_count for s in course_stats)
+        total_teaching_classes = sum(getattr(s, 'current_year_classes', 0) or getattr(s, 'total_class_count', 0) or 0 for s in course_stats)
         
         # 作业统计
         total_assignments = Assignment.query.count()
@@ -106,7 +106,7 @@ def get_dashboard_stats():
                 'author': {
                     'id': a.author.user_id,
                     'name': a.author.real_name
-                } if a.author else None
+                } if a.author else {'id': None, 'name': '系统'}
             } for a in latest_announcements],
             'user_stats_by_dept': [{
                 'dept_name': s.dept_name or '未分配院系',
@@ -477,9 +477,10 @@ def toggle_user_status(user_id):
         if not user:
             return jsonify({'error': 'User not found'}), 404
         
-        # 不能禁用自己
-        if user.user_id == current_user.user_id:
-            return jsonify({'error': 'Cannot disable current user'}), 400
+        # 不能禁用自己（如果有当前用户信息）
+        if current_user.is_authenticated and hasattr(current_user, 'user_id'):
+            if user.user_id == current_user.user_id:
+                return jsonify({'error': 'Cannot disable current user'}), 400
         
         # 不能禁用超级管理员
         if user.role == 'admin' and user.admin_profile:
@@ -893,10 +894,9 @@ def get_course_stats():
             'stats': [{
                 'course_code': s.course_code,
                 'course_name': s.course_name,
-                'teaching_class_count': s.teaching_class_count,
-                'total_student_count': s.total_student_count,
-                'assignment_count': s.assignment_count,
-                'material_count': s.material_count
+                'teaching_class_count': s.current_year_classes or s.total_class_count or 0,
+                'total_student_count': s.active_enrollments or s.total_enrollments or 0,
+                'assignment_count': 0  # 如果需要，可以单独查询
             } for s in course_stats]
         })
     except Exception as e:
@@ -1185,4 +1185,240 @@ def export_users():
         
     except Exception as e:
         current_app.logger.error(f"Failed to export users: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# ==================== 权限管理 API ====================
+
+@admin_bp.route('/admins', methods=['GET'])
+@admin_permission_required(1)
+def get_admins():
+    """获取所有管理员列表"""
+    try:
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+        permission_level = request.args.get('permission_level', type=int)
+        
+        query = Admin.query
+        
+        if permission_level is not None:
+            query = query.filter_by(permission_level=permission_level)
+        
+        paginated = query.order_by(Admin.created_at.desc()).paginate(
+            page=page, per_page=per_page, error_out=False
+        )
+        
+        admins = []
+        for admin in paginated.items:
+            admins.append({
+                'admin_id': admin.admin_id,
+                'user_id': admin.user_id,
+                'admin_no': admin.admin_no,
+                'real_name': admin.user.real_name if admin.user else '',
+                'permission_level': admin.permission_level,
+                'permissions': {
+                    'can_manage_users': admin.can_manage_users,
+                    'can_manage_forum': admin.can_manage_forum,
+                    'can_manage_courses': admin.can_manage_courses,
+                    'can_manage_grades': admin.can_manage_grades,
+                    'can_manage_announcements': admin.can_manage_announcements,
+                    'can_review_content': admin.can_review_content,
+                    'can_ban_users': admin.can_ban_users
+                },
+                'created_at': admin.created_at.isoformat() if admin.created_at else None
+            })
+        
+        return jsonify({
+            'admins': admins,
+            'total': paginated.total,
+            'pages': paginated.pages,
+            'current_page': page
+        })
+    except Exception as e:
+        current_app.logger.error(f"Failed to get admins: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@admin_bp.route('/admins/<int:admin_id>/permissions', methods=['GET'])
+@admin_permission_required(2)
+def get_single_admin_permissions(admin_id):
+    """获取管理员的权限详情"""
+    try:
+        admin = Admin.query.get_or_404(admin_id)
+        
+        return jsonify({
+            'admin_id': admin.admin_id,
+            'admin_no': admin.admin_no,
+            'real_name': admin.user.real_name if admin.user else '',
+            'permission_level': admin.permission_level,
+            'level_name': {1: '超级管理员', 2: '系统管理员', 3: '部门管理员', 4: '内容审核员'}.get(admin.permission_level, '未知'),
+            'permissions': {
+                'can_manage_users': admin.can_manage_users,
+                'can_manage_forum': admin.can_manage_forum,
+                'can_manage_courses': admin.can_manage_courses,
+                'can_manage_grades': admin.can_manage_grades,
+                'can_manage_announcements': admin.can_manage_announcements,
+                'can_review_content': admin.can_review_content,
+                'can_ban_users': admin.can_ban_users
+            }
+        })
+    except Exception as e:
+        current_app.logger.error(f"Failed to get admin permissions: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@admin_bp.route('/admins/<int:admin_id>/permissions', methods=['PUT'])
+@admin_permission_required(1)
+def update_admin_permissions(admin_id):
+    """更新管理员权限"""
+    try:
+        admin = Admin.query.get_or_404(admin_id)
+        data = request.get_json()
+        
+        # 更新权限等级
+        if 'permission_level' in data:
+            admin.permission_level = int(data['permission_level'])
+        
+        # 更新具体权限
+        permissions_map = {
+            'can_manage_users': 'can_manage_users',
+            'can_manage_forum': 'can_manage_forum',
+            'can_manage_courses': 'can_manage_courses',
+            'can_manage_grades': 'can_manage_grades',
+            'can_manage_announcements': 'can_manage_announcements',
+            'can_review_content': 'can_review_content',
+            'can_ban_users': 'can_ban_users'
+        }
+        
+        for key, attr in permissions_map.items():
+            if key in data:
+                setattr(admin, attr, bool(data[key]))
+        
+        db.session.commit()
+        
+        return jsonify({'message': 'Admin permissions updated'}), 200
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Failed to update admin permissions: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@admin_bp.route('/admins/<int:admin_id>/role', methods=['PUT'])
+@admin_permission_required(1)
+def set_admin_role(admin_id):
+    """设置管理员角色类型"""
+    try:
+        from permission_manager import init_admin_permissions
+        
+        admin = Admin.query.get_or_404(admin_id)
+        data = request.get_json()
+        
+        role_type = data.get('role_type')  # 'super_admin', 'system_admin', 'dept_admin', 'content_reviewer'
+        if not role_type:
+            return jsonify({'error': 'role_type is required'}), 400
+        
+        init_admin_permissions(admin, role_type)
+        db.session.commit()
+        
+        return jsonify({'message': 'Admin role updated'}), 200
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Failed to set admin role: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@admin_bp.route('/admins/<int:admin_id>/grant-permission', methods=['POST'])
+@admin_permission_required(1)
+def grant_admin_permission(admin_id):
+    """授予管理员特定权限"""
+    try:
+        admin = Admin.query.get_or_404(admin_id)
+        data = request.get_json()
+        
+        feature = data.get('feature')  # 功能权限名称
+        if not feature:
+            return jsonify({'error': 'feature is required'}), 400
+        
+        admin.grant_permission(feature)
+        db.session.commit()
+        
+        return jsonify({'message': f'Permission {feature} granted'}), 200
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Failed to grant permission: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@admin_bp.route('/admins/<int:admin_id>/revoke-permission', methods=['POST'])
+@admin_permission_required(1)
+def revoke_admin_permission(admin_id):
+    """撤销管理员特定权限"""
+    try:
+        admin = Admin.query.get_or_404(admin_id)
+        data = request.get_json()
+        
+        feature = data.get('feature')  # 功能权限名称
+        if not feature:
+            return jsonify({'error': 'feature is required'}), 400
+        
+        admin.revoke_permission(feature)
+        db.session.commit()
+        
+        return jsonify({'message': f'Permission {feature} revoked'}), 200
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Failed to revoke permission: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@admin_bp.route('/permission-levels', methods=['GET'])
+@admin_required
+def get_permission_levels():
+    """获取权限等级定义"""
+    try:
+        from permission_manager import get_permission_levels
+        
+        levels = get_permission_levels()
+        
+        return jsonify(levels), 200
+    except Exception as e:
+        current_app.logger.error(f"Failed to get permission levels: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@admin_bp.route('/my-permissions', methods=['GET'])
+@admin_permission_required(4)
+def get_my_permissions():
+    """获取当前管理员的权限信息"""
+    try:
+        if current_user.role != 'admin' or not current_user.admin_profile:
+            return jsonify({'error': 'Not an admin'}), 403
+        
+        admin = current_user.admin_profile
+        
+        level_names = {
+            1: '超级管理员',
+            2: '系统管理员',
+            3: '部门管理员',
+            4: '内容审核员'
+        }
+        
+        return jsonify({
+            'admin_id': admin.admin_id,
+            'admin_no': admin.admin_no,
+            'real_name': current_user.real_name,
+            'permission_level': admin.permission_level,
+            'level_name': level_names.get(admin.permission_level, '未知'),
+            'permissions': {
+                'can_manage_users': admin.can_manage_users,
+                'can_manage_forum': admin.can_manage_forum,
+                'can_manage_courses': admin.can_manage_courses,
+                'can_manage_grades': admin.can_manage_grades,
+                'can_manage_announcements': admin.can_manage_announcements,
+                'can_review_content': admin.can_review_content,
+                'can_ban_users': admin.can_ban_users
+            }
+        }), 200
+    except Exception as e:
+        current_app.logger.error(f"Failed to get my permissions: {e}")
         return jsonify({'error': str(e)}), 500

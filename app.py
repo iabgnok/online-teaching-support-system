@@ -34,6 +34,7 @@ from api.v1.assignments import assignments_bp
 from api.v1.attendance import attendance_bp
 from api.v1.grades import grades_bp
 from api.v1.admin import admin_bp
+from api.v1.forum_management import forum_mgmt_bp
 
 app.register_blueprint(api_v1)
 app.register_blueprint(classes_bp, url_prefix='/api/v1/classes')
@@ -41,6 +42,7 @@ app.register_blueprint(assignments_bp, url_prefix='/api/v1/assignments')
 app.register_blueprint(attendance_bp, url_prefix='/api/v1/attendance')
 app.register_blueprint(grades_bp)
 app.register_blueprint(admin_bp, url_prefix='/api/v1/admin')
+app.register_blueprint(forum_mgmt_bp)
 
 # ==================== 扩展初始化 ====================
 db.init_app(app)

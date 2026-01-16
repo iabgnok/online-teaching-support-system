@@ -1,13 +1,24 @@
 from flask import jsonify, request, current_app
-from flask_login import login_required, current_user
+from flask_login import current_user
+from functools import wraps
 from models import db, VStudentMyAssignments, Submission, Assignment, generate_next_id
 from werkzeug.utils import secure_filename
 import os
 from datetime import datetime
 from . import api_v1
 
+
+def api_login_required(f):
+    """检查用户是否登录，如果未登录则返回 401"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not current_user.is_authenticated:
+            return jsonify({'error': 'Authentication required'}), 401
+        return f(*args, **kwargs)
+    return decorated_function
+
 @api_v1.route('/student/assignment/<int:assignment_id>', methods=['GET'])
-@login_required
+@api_login_required
 def get_student_assignment_detail(assignment_id):
     """获取学生作业详情（包含提交状态）"""
     if current_user.role != 'student':
@@ -81,7 +92,7 @@ def get_student_assignment_detail(assignment_id):
     })
 
 @api_v1.route('/student/submit_assignment', methods=['POST'])
-@login_required
+@api_login_required
 def submit_assignment():
     """学生提交作业"""
     if current_user.role != 'student':

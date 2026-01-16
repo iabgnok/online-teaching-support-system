@@ -97,13 +97,70 @@ class Admin(db.Model):
     user_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id', name='FK_Admin_User'), unique=True, nullable=False)
     admin_no = db.Column(db.String(20), unique=True, nullable=False)
     dept_id = db.Column(db.BigInteger, db.ForeignKey('Department.dept_id', name='FK_Admin_Department'))
-    permission_level = db.Column(db.SmallInteger, default=3)  # 1=最高, 2=中级, 3=一般
+    
+    # 权限等级: 1=超级管理员, 2=系统管理员, 3=部门管理员, 4=内容审核员
+    permission_level = db.Column(db.SmallInteger, default=4)
+    
+    # 权限范围标记 (逗号分隔)
+    permissions = db.Column(db.String(500), default='')  # 如: 'user_manage,forum_manage,announcement_manage'
+    
+    # 审核权限特定字段
+    can_manage_users = db.Column(db.Boolean, default=False)  # 用户管理
+    can_manage_forum = db.Column(db.Boolean, default=False)  # 论坛管理
+    can_manage_courses = db.Column(db.Boolean, default=False)  # 课程管理
+    can_manage_grades = db.Column(db.Boolean, default=False)  # 成绩管理
+    can_manage_announcements = db.Column(db.Boolean, default=False)  # 公告管理
+    can_review_content = db.Column(db.Boolean, default=False)  # 内容审核
+    can_ban_users = db.Column(db.Boolean, default=False)  # 禁用用户
+    
     created_at = db.Column(db.DateTime(timezone=True), default=func.now())
     updated_at = db.Column(db.DateTime(timezone=True), default=func.now(), onupdate=func.now())
     
     def has_permission(self, level):
         """检查是否有指定级别的权限（数字越小权限越高）"""
         return self.permission_level <= level
+    
+    def has_feature_permission(self, feature):
+        """检查是否有特定功能权限"""
+        feature_map = {
+            'user_manage': 'can_manage_users',
+            'forum_manage': 'can_manage_forum',
+            'courses_manage': 'can_manage_courses',
+            'grades_manage': 'can_manage_grades',
+            'announcements_manage': 'can_manage_announcements',
+            'content_review': 'can_review_content',
+            'ban_users': 'can_ban_users'
+        }
+        attr = feature_map.get(feature)
+        return getattr(self, attr, False) if attr else False
+    
+    def grant_permission(self, feature):
+        """授予权限"""
+        attr = {
+            'user_manage': 'can_manage_users',
+            'forum_manage': 'can_manage_forum',
+            'courses_manage': 'can_manage_courses',
+            'grades_manage': 'can_manage_grades',
+            'announcements_manage': 'can_manage_announcements',
+            'content_review': 'can_review_content',
+            'ban_users': 'can_ban_users'
+        }.get(feature)
+        if attr:
+            setattr(self, attr, True)
+    
+    def revoke_permission(self, feature):
+        """撤销权限"""
+        attr = {
+            'user_manage': 'can_manage_users',
+            'forum_manage': 'can_manage_forum',
+            'courses_manage': 'can_manage_courses',
+            'grades_manage': 'can_manage_grades',
+            'announcements_manage': 'can_manage_announcements',
+            'content_review': 'can_review_content',
+            'ban_users': 'can_ban_users'
+        }.get(feature)
+        if attr:
+            setattr(self, attr, False)
     
     @property
     def name(self):
@@ -572,6 +629,71 @@ class Message(db.Model):
     recipient = db.relationship('Users', foreign_keys=[recipient_id], backref='received_messages')
 
 
+class ForumModeration(db.Model):
+    """论坛内容审核日志"""
+    __tablename__ = 'ForumModeration'
+
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
+    
+    # 审核对象：帖子或评论
+    content_type = db.Column(db.String(20), nullable=False)  # 'post' 或 'comment'
+    post_id = db.Column(db.BigInteger, db.ForeignKey('ForumPost.id'), nullable=True)
+    comment_id = db.Column(db.BigInteger, db.ForeignKey('ForumComment.id'), nullable=True)
+    
+    # 操作信息
+    admin_id = db.Column(db.BigInteger, db.ForeignKey('Admin.admin_id'), nullable=False)
+    action = db.Column(db.String(50), nullable=False)  # 'pin', 'unpin', 'delete', 'hide', 'unhide', 'warn', 'lock', 'unlock'
+    reason = db.Column(db.Text)  # 操作原因
+    
+    # 内容快照（用于记录被删除的内容）
+    content_snapshot = db.Column(db.Text)  # 操作前的内容备份
+    
+    # 状态
+    status = db.Column(db.String(20), default='completed')  # 'pending', 'completed', 'reversed'
+    
+    created_at = db.Column(db.DateTime(timezone=True), default=func.now())
+    reversed_at = db.Column(db.DateTime(timezone=True), nullable=True)  # 撤销时间
+    reversed_by = db.Column(db.BigInteger, db.ForeignKey('Admin.admin_id'), nullable=True)  # 谁撤销的
+    
+    # Relationships
+    post = db.relationship('ForumPost', backref='moderation_records')
+    comment = db.relationship('ForumComment', backref='moderation_records')
+    reverser = db.relationship('Admin', foreign_keys=[reversed_by], backref='reversed_moderations')
+
+
+class ForumPostStatus(db.Model):
+    """论坛帖子状态追踪（隐藏、锁定等）"""
+    __tablename__ = 'ForumPostStatus'
+
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
+    post_id = db.Column(db.BigInteger, db.ForeignKey('ForumPost.id'), nullable=False, unique=True)
+    
+    # 状态标记
+    is_hidden = db.Column(db.Boolean, default=False)  # 隐藏（仅管理员和作者可见）
+    is_locked = db.Column(db.Boolean, default=False)  # 锁定（禁止评论）
+    is_flagged = db.Column(db.Boolean, default=False)  # 被标记为需要审核
+    
+    # 隐藏/锁定原因
+    hide_reason = db.Column(db.String(255))  # 隐藏原因
+    lock_reason = db.Column(db.String(255))  # 锁定原因
+    
+    # 警告信息
+    warning_level = db.Column(db.SmallInteger, default=0)  # 0=无警告, 1=轻度, 2=中度, 3=严重
+    warning_message = db.Column(db.Text)  # 警告信息
+    
+    # 审核人员
+    hidden_by = db.Column(db.BigInteger, db.ForeignKey('Admin.admin_id'), nullable=True)
+    locked_by = db.Column(db.BigInteger, db.ForeignKey('Admin.admin_id'), nullable=True)
+    
+    created_at = db.Column(db.DateTime(timezone=True), default=func.now())
+    updated_at = db.Column(db.DateTime(timezone=True), default=func.now(), onupdate=func.now())
+    
+    # Relationships
+    post = db.relationship('ForumPost', backref='status_tracking')
+    hider = db.relationship('Admin', foreign_keys=[hidden_by], backref='hidden_posts')
+    locker = db.relationship('Admin', foreign_keys=[locked_by], backref='locked_posts')
+
+
 # ==================== 子模式视图（只读） ====================
 
 class VStudentMyCourses(db.Model):
@@ -741,3 +863,8 @@ class VAdminCourseStatistics(db.Model):
     active_class_count = db.Column(db.Integer)
     total_enrollments = db.Column(db.Integer)
     active_enrollments = db.Column(db.Integer)
+
+# ==================== 关系配置（在所有模型定义后） ====================
+
+# 为 Admin 添加与 ForumModeration 的关系
+Admin.moderation_actions = db.relationship('ForumModeration', backref='moderator', lazy='dynamic', foreign_keys='ForumModeration.admin_id')

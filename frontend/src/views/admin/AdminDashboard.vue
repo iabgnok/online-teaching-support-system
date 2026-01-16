@@ -46,6 +46,25 @@
       </el-col>
     </el-row>
 
+    <!-- 权限和论坛管理 -->
+    <el-row :gutter="20" class="main-section">
+      <el-col :span="8">
+        <el-card shadow="hover" class="function-card" @click="$router.push('/admin/permissions')">
+          <div class="card-icon">🔑</div>
+          <h3>权限管理</h3>
+          <p>管理系统管理员的权限设置</p>
+        </el-card>
+      </el-col>
+
+      <el-col :span="8">
+        <el-card shadow="hover" class="function-card" @click="$router.push('/admin/forum-management')">
+          <div class="card-icon">💬</div>
+          <h3>论坛管理</h3>
+          <p>管理系统论坛的帖子和评论</p>
+        </el-card>
+      </el-col>
+    </el-row>
+
     <!-- 系统公告区 -->
     <el-row :gutter="20" class="main-section">
       <el-col :span="24">
@@ -58,7 +77,15 @@
               </el-button>
             </div>
           </template>
-          <el-empty description="暂无系统公告" :image-size="100" />
+          
+          <div v-if="stats.announcements && stats.announcements.length > 0" class="announcements-list">
+            <div v-for="announcement in stats.announcements.slice(0, 5)" :key="announcement.id" class="announcement-item">
+              <h4>{{ announcement.title }}</h4>
+              <p>{{ announcement.content }}</p>
+              <span class="announcement-time">{{ formatDate(announcement.created_at) }}</span>
+            </div>
+          </div>
+          <el-empty v-else description="暂无系统公告" :image-size="100" />
         </el-card>
       </el-col>
     </el-row>
@@ -176,6 +203,7 @@ const importTab = ref('users')
 const showAnnouncementDialog = ref(false)
 const importing = ref(false)
 const publishing = ref(false)
+const announcementForm = ref({ title: '', content: '' })
 
 const updateTime = () => {
   const now = new Date()
@@ -188,6 +216,12 @@ const updateTime = () => {
   })
 }
 
+const formatDate = (dateString) => {
+  if (!dateString) return '-'
+  const date = new Date(dateString)
+  return date.toLocaleDateString('zh-CN') + ' ' + date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+}
+
 const handleImportSuccess = (response) => {
   ElMessage.success(response.message || '导入成功')
   showImportDialog.value = false
@@ -197,6 +231,16 @@ const handleImportSuccess = (response) => {
 const handleImportError = (error) => {
   console.error('Import error:', error)
   ElMessage.error('导入失败，请检查文件格式')
+}
+
+// 加载公告列表
+const loadAnnouncements = async () => {
+  try {
+    const response = await api.get('/announcements')
+    stats.value.announcements = response.data || []
+  } catch (error) {
+    console.error('Failed to load announcements:', error)
+  }
 }
 
 // 发布公告
@@ -215,6 +259,7 @@ const publishAnnouncement = async () => {
     ElMessage.success('公告发布成功')
     showAnnouncementDialog.value = false
     announcementForm.value = { title: '', content: '' }
+    loadAnnouncements() // 重新加载公告列表
   } catch (error) {
     console.error('Failed to publish announcement:', error)
     ElMessage.error('发布失败')
@@ -227,6 +272,7 @@ onMounted(() => {
   currentUser.value = JSON.parse(localStorage.getItem('user') || '{}')
   updateTime()
   setInterval(updateTime, 60000) // 每分钟更新时间
+  loadAnnouncements() // 初始化加载公告
 })
 </script>
 

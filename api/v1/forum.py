@@ -1,16 +1,29 @@
+# -*- coding: utf-8 -*-
 from flask import jsonify, request, current_app
-from flask_login import login_required, current_user
+from flask_login import current_user
+from functools import wraps
 from models import ForumPost, ForumComment, TeachingClass, TeacherClass, StudentClass, db, generate_next_id
 from . import api_v1
 from datetime import datetime
 import os
 from werkzeug.utils import secure_filename
 
+
+def api_login_required(f):
+    """API????????401 JSON?????"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not current_user.is_authenticated:
+            return jsonify({'error': 'Authentication required'}), 401
+        return f(*args, **kwargs)
+    return decorated_function
+
+
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in {'png', 'jpg', 'jpeg', 'gif', 'pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'txt', 'zip', '7z', 'rar'}
 
 @api_v1.route('/my-classes', methods=['GET'])
-@login_required
+@api_login_required
 def get_my_classes():
     classes = []
     try:
@@ -51,10 +64,10 @@ def get_my_classes():
     return jsonify(classes)
 
 @api_v1.route('/classes/<int:class_id>/forum/posts', methods=['GET'])
-@login_required
+@api_login_required
 def get_forum_posts(class_id):
-    """获取某课程讨论区的帖子列表"""
-    # 简单的权限检查，未来应校验用户是否属于该班级
+    """?????????????"""
+    # ???????????????
     
     posts = ForumPost.query.filter_by(class_id=class_id).order_by(ForumPost.is_pinned.desc(), ForumPost.created_at.desc()).all()
     
@@ -78,14 +91,14 @@ def get_forum_posts(class_id):
     return jsonify(results)
 
 @api_v1.route('/classes/<int:class_id>/forum/posts', methods=['POST'])
-@login_required
+@api_login_required
 def create_forum_post(class_id):
-    """发布新帖子 (支持文件)"""
+    """???????????"""
     title = request.form.get('title')
     content = request.form.get('content')
     file = request.files.get('file')
     
-    # 兼容 JSON 请求 (无文件时)
+    # ??JSON????????
     if not title and not content and request.is_json:
         data = request.get_json()
         title = data.get('title')
@@ -123,9 +136,9 @@ def create_forum_post(class_id):
     return jsonify({'message': 'Post created', 'id': post.id}), 201
 
 @api_v1.route('/forum/posts/<int:post_id>', methods=['GET'])
-@login_required
+@api_login_required
 def get_post_detail(post_id):
-    """获取帖子详情与评论"""
+    """?????????"""
     post = ForumPost.query.get_or_404(post_id)
     
     # Update view count
@@ -164,7 +177,7 @@ def get_post_detail(post_id):
 
 
 @api_v1.route('/download/<int:post_id>')
-@login_required
+@api_login_required
 def download_post_file(post_id):
     from flask import send_from_directory
     post = ForumPost.query.get_or_404(post_id)
@@ -177,7 +190,7 @@ def download_post_file(post_id):
 
 
 @api_v1.route('/forum/posts/<int:post_id>', methods=['DELETE'])
-@login_required
+@api_login_required
 def delete_post(post_id):
     post = ForumPost.query.get_or_404(post_id)
     
@@ -218,7 +231,7 @@ def delete_post(post_id):
     return jsonify({'message': 'Post deleted'})
 
 @api_v1.route('/forum/posts/<int:post_id>', methods=['PUT'])
-@login_required
+@api_login_required
 def update_post(post_id):
     post = ForumPost.query.get_or_404(post_id)
     
@@ -238,9 +251,9 @@ def update_post(post_id):
 
 
 @api_v1.route('/forum/posts/<int:post_id>/comments', methods=['POST'])
-@login_required
+@api_login_required
 def add_comment(post_id):
-    """添加评论/回复"""
+    """????/??"""
     data = request.get_json()
     content = data.get('content')
     parent_id = data.get('parent_id') # Optional for nested replies
@@ -261,7 +274,7 @@ def add_comment(post_id):
     return jsonify({'message': 'Comment added', 'id': comment.id}), 201
 
 @api_v1.route('/forum/comments/<int:comment_id>', methods=['DELETE'])
-@login_required
+@api_login_required
 def delete_comment(comment_id):
     comment = ForumComment.query.get_or_404(comment_id)
     post = comment.post
@@ -289,7 +302,7 @@ def delete_comment(comment_id):
     return jsonify({'message': 'Comment deleted'})
 
 @api_v1.route('/forum/comments/<int:comment_id>', methods=['PUT'])
-@login_required
+@api_login_required
 def update_comment(comment_id):
     comment = ForumComment.query.get_or_404(comment_id)
     

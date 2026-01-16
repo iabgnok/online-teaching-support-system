@@ -1,7 +1,18 @@
 from flask import jsonify, request
-from flask_login import login_user, logout_user, login_required, current_user
+from flask_login import login_user, logout_user, current_user
 from models import Users, Student, Teacher
 from . import api_v1
+from functools import wraps
+
+# 自定义认证装饰器，用于 API 端点
+def api_login_required(f):
+    """检查用户是否登录，如果未登录则返回 401"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not current_user.is_authenticated:
+            return jsonify({'error': 'Authentication required'}), 401
+        return f(*args, **kwargs)
+    return decorated_function
 
 @api_v1.route('/login', methods=['POST'])
 def api_login():
@@ -29,13 +40,13 @@ def api_login():
     })
 
 @api_v1.route('/logout', methods=['POST'])
-@login_required
+@api_login_required
 def api_logout():
     logout_user()
     return jsonify({'message': 'Logged out successfully'})
 
 @api_v1.route('/me', methods=['GET'])
-@login_required
+@api_login_required
 def get_current_user():
     data = {
         'id': current_user.user_id,
@@ -64,7 +75,7 @@ def get_current_user():
     return jsonify(data)
 
 @api_v1.route('/users/search', methods=['GET'])
-@login_required
+@api_login_required
 def search_users():
     """搜索用户（用于站内信等功能）"""
     query = request.args.get('q', '').strip()
@@ -98,7 +109,7 @@ def search_users():
     return jsonify(results)
 
 @api_v1.route('/profile', methods=['PUT'])
-@login_required
+@api_login_required
 def update_profile():
     """更新当前用户的基本信息"""
     data = request.get_json()
@@ -119,7 +130,7 @@ def update_profile():
         return jsonify({'error': str(e)}), 500
 
 @api_v1.route('/change-password', methods=['POST'])
-@login_required
+@api_login_required
 def change_password():
     """修改当前用户密码"""
     data = request.get_json()

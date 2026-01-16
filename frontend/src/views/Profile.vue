@@ -113,7 +113,7 @@ const getRoleType = (role) => {
 const loadProfile = async () => {
   try {
     const response = await api.get('/me')
-    const user = response.data.user
+    const user = response.data
     profileForm.value = {
       username: user.username,
       real_name: user.real_name,
