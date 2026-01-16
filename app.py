@@ -27,7 +27,15 @@ app.config.from_object(DevelopmentConfig)
 
 # ==================== Blueprint Registration ====================
 from api.v1 import api_v1
+from api.v1.classes import classes_bp
+from api.v1.assignments import assignments_bp
+from api.v1.attendance import attendance_bp
+
 app.register_blueprint(api_v1)
+app.register_blueprint(classes_bp, url_prefix='/api/v1/classes')
+app.register_blueprint(assignments_bp, url_prefix='/api/v1/assignments')
+app.register_blueprint(attendance_bp, url_prefix='/api/v1/attendance')
+
 
 # ==================== 扩展初始化 ====================
 db.init_app(app)
@@ -1780,7 +1788,7 @@ def student_dashboard():
                 student_id=student.student_id
             ).first()
             
-            # 如果记录存在且状态为'absent' (未签到), 则加入列表
+            # 如果记录存在且状态为'absent' (未签到)，则加入列表
             if record and record.status == 'absent':
                 status_str = 'active' if now <= cand.end_time else 'late'
                 active_attendance.append({
@@ -2115,27 +2123,20 @@ def teacher_class_detail(class_id):
     # 为每个作业/考试添加统计信息
     assignments_with_stats = []
     for assignment in assignments:
-        # 统计已提交但未批改的数量
-        pending_count = Submission.query.filter_by(
+        # 统计已提交的作业和考试
+        submission = Submission.query.filter_by(
             assignment_id=assignment.assignment_id,
-            status='submitted'
-        ).count()
+            class_id=class_id
+        ).all()
         
-        # 统计总提交数
-        total_submissions = Submission.query.filter_by(
-            assignment_id=assignment.assignment_id
-        ).count()
-        
-        # 统计已批改数
-        graded_count = Submission.query.filter_by(
-            assignment_id=assignment.assignment_id,
-            status='graded'
-        ).count()
+        submitted_count = sum(1 for s in submission if s.status in ['submitted', 'graded'])
+        total_count = len(submission)
+        graded_count = sum(1 for s in submission if s.status == 'graded')
         
         assignments_with_stats.append({
             'assignment': assignment,
-            'pending_count': pending_count,
-            'total_submissions': total_submissions,
+            'submitted_count': submitted_count,
+            'total_count': total_count,
             'graded_count': graded_count
         })
     
@@ -3025,30 +3026,6 @@ def download_submission_file(submission_id):
         app.logger.error(f"下载作业文件失败: {e}")
         flash(f'下载失败：{e}', 'danger')
         return redirect(request.referrer or url_for('index'))
-    
-    try:
-        # 构建完整文件路径
-        file_path = os.path.join(app.config['MATERIALS_FOLDER'], material.file_path)
-        
-        if not os.path.exists(file_path):
-            flash('文件不存在', 'danger')
-            return redirect(request.referrer or url_for('index'))
-        
-        # 增加下载次数
-        material.download_count += 1
-        db.session.commit()
-        
-        # 发送文件
-        return send_file(
-            file_path,
-            as_attachment=True,
-            download_name=material.file_name
-        )
-        
-    except Exception as e:
-        app.logger.error(f"下载文件失败: {e}")
-        flash(f'下载失败：{e}', 'danger')
-        return redirect(request.referrer or url_for('index'))
 
 
 @app.route('/teacher/assignment/<int:assignment_id>/delete', methods=['POST'])
@@ -3450,37 +3427,35 @@ def teacher_query():
                 TeachingClass, StudentClass.class_id == TeachingClass.class_id
             ).join(
                 Course, TeachingClass.course_id == Course.course_id
-            ).filter(
-                StudentClass.class_id.in_(teaching_class_ids)
-            )
+            ).filter(TeachingClass.class_id.in_(teaching_class_ids))
             
+            if class_id:
+                query = query.filter(TeachingClass.class_id == class_id)
             if student_no:
                 query = query.filter(Student.student_no.like(f'%{student_no}%'))
             if student_name:
                 query = query.filter(Student.name.like(f'%{student_name}%'))
-            if class_id:
-                query = query.filter(StudentClass.class_id == int(class_id))
-            
+        
             results = query.all()
             
         elif query_type == 'submission':
             # 作业提交情况查询
-            class_id = request.form.get('class_id') or request.args.get('class_id', '')
-            assignment_title = request.form.get('assignment_title') or request.args.get('assignment_title', '')
-            status = request.form.get('status') or request.args.get('status', '')
+            class_id = request.args.get('class_id', '')
+            assignment_id = request.args.get('assignment_id', '')
+            status = request.args.get('status', '')
             
             query = db.session.query(Submission, Assignment, Student).join(
                 Assignment, Submission.assignment_id == Assignment.assignment_id
             ).join(
                 Student, Submission.student_id == Student.student_id
-            ).filter(
-                Assignment.class_id.in_(teaching_class_ids)
-            )
+            ).join(
+                TeachingClass, Assignment.class_id == TeachingClass.class_id
+            ).filter(TeachingClass.class_id.in_(teaching_class_ids))
             
             if class_id:
-                query = query.filter(Assignment.class_id == int(class_id))
-            if assignment_title:
-                query = query.filter(Assignment.title.like(f'%{assignment_title}%'))
+                query = query.filter(TeachingClass.class_id == class_id)
+            if assignment_id:
+                query = query.filter(Assignment.assignment_id == assignment_id)
             if status:
                 query = query.filter(Submission.status == status)
             
@@ -3500,9 +3475,7 @@ def teacher_query():
                 TeachingClass, Grade.class_id == TeachingClass.class_id
             ).join(
                 Course, TeachingClass.course_id == Course.course_id
-            ).filter(
-                Grade.class_id.in_(teaching_class_ids)
-            )
+            ).filter(TeachingClass.class_id.in_(teaching_class_ids))
             
             if student_no:
                 query = query.filter(Student.student_no.like(f'%{student_no}%'))
@@ -3552,9 +3525,7 @@ def student_query():
                 TeachingClass, StudentClass.class_id == TeachingClass.class_id
             ).join(
                 Course, TeachingClass.course_id == Course.course_id
-            ).filter(
-                StudentClass.student_id == student.student_id
-            )
+            ).filter(StudentClass.student_id == student.student_id)
             
             if course_name:
                 query = query.filter(Course.course_name.like(f'%{course_name}%'))
@@ -3569,65 +3540,37 @@ def student_query():
             assignment_type = request.form.get('assignment_type') or request.args.get('assignment_type', '')
             status = request.form.get('status') or request.args.get('status', '')
             
-            # 获取学生选修的班级ID
+            # 获取学生的所有教学班
             class_ids = [sc.class_id for sc in StudentClass.query.filter_by(student_id=student.student_id).all()]
             
             query = db.session.query(Assignment, TeachingClass, Course).join(
                 TeachingClass, Assignment.class_id == TeachingClass.class_id
             ).join(
                 Course, TeachingClass.course_id == Course.course_id
-            ).filter(
-                Assignment.class_id.in_(class_ids)
-            )
+            ).filter(Assignment.class_id.in_(class_ids))
             
             if course_name:
                 query = query.filter(Course.course_name.like(f'%{course_name}%'))
             if assignment_type:
                 query = query.filter(Assignment.type == assignment_type)
             
-            # 获取所有作业并附加提交状态
-            assignments = query.all()
-            for assignment, teaching_class, course in assignments:
-                submission = Submission.query.filter_by(
-                    assignment_id=assignment.assignment_id,
-                    student_id=student.student_id
-                ).first()
-                
-                if status:
-                    if status == 'not_submitted' and submission:
-                        continue
-                    if status == 'submitted' and (not submission or submission.status == 'graded'):
-                        continue
-                    if status == 'graded' and (not submission or submission.status != 'graded'):
-                        continue
-                
-                results.append({
-                    'assignment': assignment,
-                    'teaching_class': teaching_class,
-                    'course': course,
-                    'submission': submission
-                })
-            
+            results = query.all()
+        
         elif query_type == 'grade':
             # 成绩查询（只能查自己的）
             course_name = request.form.get('course_name') or request.args.get('course_name', '')
-            min_grade = request.form.get('min_grade') or request.args.get('min_grade', '')
-            max_grade = request.form.get('max_grade') or request.args.get('max_grade', '')
+            semester = request.form.get('semester') or request.args.get('semester', '')
             
             query = db.session.query(Grade, TeachingClass, Course).join(
                 TeachingClass, Grade.class_id == TeachingClass.class_id
             ).join(
                 Course, TeachingClass.course_id == Course.course_id
-            ).filter(
-                Grade.student_id == student.student_id
-            )
+            ).filter(Grade.student_id == student.student_id)
             
             if course_name:
                 query = query.filter(Course.course_name.like(f'%{course_name}%'))
-            if min_grade:
-                query = query.filter(Grade.final_grade >= float(min_grade))
-            if max_grade:
-                query = query.filter(Grade.final_grade <= float(max_grade))
+            if semester:
+                query = query.filter(TeachingClass.semester.like(f'%{semester}%'))
             
             results = query.all()
     
@@ -3653,6 +3596,7 @@ def admin_query_export():
     writer = csv.writer(output)
     
     if query_type == 'user':
+        # 用户查询
         username = request.args.get('username', '')
         real_name = request.args.get('real_name', '')
         role = request.args.get('role', '')
@@ -3738,6 +3682,7 @@ def admin_query_export():
         courses = query.all()
         
         writer.writerow(['课程代码', '课程名称', '课程类型', '学分', '学时', '课程描述'])
+        # 写入数据
         for course in courses:
             writer.writerow([
                 course.course_code,
@@ -3836,7 +3781,7 @@ def admin_query_export():
         results = query.all()
         
         if show_details:
-            writer.writerow(['学号', '姓名', '课程名称', '教学班', '作业平均', '考试平均', '教师评价', '最终成绩', 
+            writer.writerow(['学号', '姓名', '课程名称', '教学班', '作业平均', '考试平均', '教师评分', '最终成绩', 
                            '已交作业', '缺交作业', '已交考试', '缺交考试', '作业完成率'])
             for grade, student, tc, course in results:
                 # 计算作业考试缺交情况
@@ -3872,7 +3817,7 @@ def admin_query_export():
                     f'{completion_rate:.1f}%'
                 ])
         else:
-            writer.writerow(['学号', '姓名', '课程名称', '教学班', '作业平均', '考试平均', '教师评价', '最终成绩'])
+            writer.writerow(['学号', '姓名', '课程名称', '教学班', '作业平均', '考试平均', '教师评分', '最终成绩'])
             for grade, student, tc, course in results:
                 writer.writerow([
                     student.student_no,
@@ -4027,156 +3972,6 @@ def teacher_query_export():
                 student.name,
                 course.course_name,
                 tc.class_name,
-                f'{grade.regular_grade:.1f}' if grade.regular_grade else '-',
-                f'{grade.exam_grade:.1f}' if grade.exam_grade else '-',
-                f'{grade.teacher_score:.1f}' if grade.teacher_score else '-',
-                f'{grade.final_grade:.1f}' if grade.final_grade else '-'
-            ])
-        
-        filename = f'成绩查询_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
-    
-    else:
-        flash('无效的查询类型', 'danger')
-        return redirect(url_for('teacher_query'))
-    
-    output.seek(0)
-    response = make_response(output.getvalue().encode('utf-8-sig'))
-    response.headers['Content-Type'] = 'text/csv; charset=utf-8-sig'
-    response.headers['Content-Disposition'] = f'attachment; filename={filename}'
-    
-    return response
-
-
-@app.route('/student/query/export')
-@login_required
-@role_required('student')
-def student_query_export():
-    """学生查询结果导出为CSV"""
-    student_id = db.session.query(Student.student_id).filter(
-        Student.user_id == current_user.user_id
-    ).scalar()
-    
-    if not student_id:
-        flash('无法找到学生信息', 'danger')
-        return redirect(url_for('student_query'))
-    
-    query_type = request.args.get('type', 'course')
-    
-    output = io.StringIO()
-    writer = csv.writer(output)
-    
-    if query_type == 'course':
-        course_name = request.args.get('course_name', '')
-        semester = request.args.get('semester', '')
-        
-        query = db.session.query(Course, TeachingClass, StudentClass).join(
-            TeachingClass, Course.course_id == TeachingClass.course_id
-        ).join(
-            StudentClass, TeachingClass.class_id == StudentClass.class_id
-        ).filter(StudentClass.student_id == student_id)
-        
-        if course_name:
-            query = query.filter(Course.course_name.like(f'%{course_name}%'))
-        if semester:
-            query = query.filter(TeachingClass.semester.like(f'%{semester}%'))
-        
-        results = query.all()
-        
-        writer.writerow(['课程代码', '课程名称', '学分', '教学班', '学期', '上课时间', '上课地点'])
-        for course, tc, sc in results:
-            writer.writerow([
-                course.course_code,
-                course.course_name,
-                course.credit,
-                tc.class_name,
-                tc.semester,
-                tc.schedule or '-',
-                tc.location or '-'
-            ])
-        
-        filename = f'我的课程_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
-        
-    elif query_type == 'assignment':
-        class_id = request.args.get('class_id', '')
-        assignment_type = request.args.get('type', '')
-        status = request.args.get('status', '')
-        
-        # 先获取学生的所有教学班
-        class_ids = db.session.query(StudentClass.class_id).filter(
-            StudentClass.student_id == student_id
-        ).all()
-        class_ids = [c[0] for c in class_ids]
-        
-        query = db.session.query(Assignment, TeachingClass, Course).join(
-            TeachingClass, Assignment.class_id == TeachingClass.class_id
-        ).join(
-            Course, TeachingClass.course_id == Course.course_id
-        ).filter(Assignment.class_id.in_(class_ids))
-        
-        if class_id:
-            query = query.filter(Assignment.class_id == class_id)
-        if assignment_type:
-            query = query.filter(Assignment.type == assignment_type)
-        
-        results = query.all()
-        
-        # 如果需要过滤提交状态，需要额外查询
-        filtered_results = []
-        for assignment, tc, course in results:
-            submission = Submission.query.filter_by(
-                assignment_id=assignment.assignment_id,
-                student_id=student_id
-            ).first()
-            
-            if status == 'submitted' and not submission:
-                continue
-            elif status == 'unsubmitted' and submission:
-                continue
-            
-            filtered_results.append((assignment, tc, course, submission))
-        
-        writer.writerow(['作业标题', '类型', '课程名称', '教学班', '发布时间', '截止时间', '提交状态', '成绩'])
-        for assignment, tc, course, submission in filtered_results:
-            type_name = '📝 作业' if assignment.type == 'homework' else '📄 考试'
-            submit_status = '已提交' if submission else '未提交'
-            score = f'{submission.score:.1f}' if submission and submission.score else '-'
-            
-            writer.writerow([
-                assignment.title,
-                type_name,
-                course.course_name,
-                tc.class_name,
-                assignment.create_time.strftime('%Y-%m-%d %H:%M'),
-                assignment.deadline.strftime('%Y-%m-%d %H:%M'),
-                submit_status,
-                score
-            ])
-        
-        filename = f'作业考试查询_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
-        
-    elif query_type == 'grade':
-        course_name = request.args.get('course_name', '')
-        semester = request.args.get('semester', '')
-        
-        query = db.session.query(Grade, TeachingClass, Course).join(
-            TeachingClass, Grade.class_id == TeachingClass.class_id
-        ).join(
-            Course, TeachingClass.course_id == Course.course_id
-        ).filter(Grade.student_id == student_id)
-        
-        if course_name:
-            query = query.filter(Course.course_name.like(f'%{course_name}%'))
-        if semester:
-            query = query.filter(TeachingClass.semester.like(f'%{semester}%'))
-        
-        results = query.all()
-        
-        writer.writerow(['课程名称', '教学班', '学期', '平时成绩', '期末成绩', '教师评分', '最终成绩'])
-        for grade, tc, course in results:
-            writer.writerow([
-                course.course_name,
-                tc.class_name,
-                tc.semester,
                 f'{grade.regular_grade:.1f}' if grade.regular_grade else '-',
                 f'{grade.exam_grade:.1f}' if grade.exam_grade else '-',
                 f'{grade.teacher_score:.1f}' if grade.teacher_score else '-',

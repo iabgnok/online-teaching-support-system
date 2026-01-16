@@ -3,23 +3,15 @@
     <el-header class="main-header" height="60px">
       <div class="header-content">
         <h1 class="logo">在线教学支持系统</h1>
-        <div class="nav-links">
-           <!-- Student Links -->
-           <template v-if="userRole !== 'teacher'">
-               <router-link to="/" class="nav-link">首页</router-link>
-               <router-link to="/courses" class="nav-link">课程</router-link>
-               <router-link to="/schedule" class="nav-link">日程</router-link>
-           </template>
-
-           <!-- Teacher Links -->
-           <template v-else>
-               <router-link to="/teacher/dashboard" class="nav-link">工作台</router-link>
-               <!-- Add more teacher specific links here -->
-           </template>
-
-           <!-- Common Links -->
-           <router-link to="/forum" class="nav-link">论坛</router-link>
-           <router-link to="/messages" class="nav-link">站内信</router-link>
+        <div class="nav-links" v-if="userRole">
+           <router-link 
+             v-for="link in navigationLinks" 
+             :key="link.path" 
+             :to="link.path" 
+             class="nav-link"
+           >
+             {{ link.label }}
+           </router-link>
            <a href="#" @click.prevent="logout" class="nav-link">退出</a>
         </div>
       </div>
@@ -31,7 +23,7 @@
 </template>
 
 <script setup>
-import { ref, watchEffect } from 'vue'
+import { ref, watchEffect, computed } from 'vue'
 import api from './api'
 import { useRouter, useRoute } from 'vue-router'
 
@@ -44,6 +36,27 @@ watchEffect(() => {
     // Dependency on route.path ensures this runs on navigation
     const path = route.path 
     userRole.value = localStorage.getItem('user_role') || 'student'
+})
+
+const navigationLinks = computed(() => {
+  const common = [
+    { path: '/forum', label: '论坛' },
+    { path: '/messages', label: '站内信' }
+  ]
+  
+  if (userRole.value === 'teacher') {
+    return [
+      { path: '/teacher/dashboard', label: '工作台' },
+      ...common
+    ]
+  } else {
+    return [
+      { path: '/', label: '首页' },
+      { path: '/schedule', label: '日程' },
+      ...common
+    ]
+  }
+  return [] // Default to an empty array if role is not set or recognized
 })
 
 const logout = async () => {

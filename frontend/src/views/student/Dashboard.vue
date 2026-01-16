@@ -1,7 +1,7 @@
 <template>
   <div class="dashboard-container">
     <div class="welcome-banner mb-4">
-      <h2>👋 欢迎回来，{{ user.name || '同学' }}</h2>
+      <h2>👋 欢迎回来，{{ user.real_name || user.name || '同学' }}</h2>
       <p class="text-secondary">{{ currentDate }}</p>
     </div>
 
@@ -78,7 +78,7 @@
                 <el-skeleton :rows="2" animated />
             </div>
             <div v-else>
-               <el-table :data="upcomingEvents" style="width: 100%" stripe>
+               <el-table :data="upcomingEvents" style="width: 100%" stripe @row-click="handleEventClick">
                   <el-table-column prop="title" label="任务名称" min-width="200" show-overflow-tooltip />
                   <el-table-column prop="end" label="截止时间" width="160">
                       <template #default="scope">
@@ -92,6 +92,13 @@
                           </el-tag>
                       </template>
                   </el-table-column>
+                   <el-table-column label="状态" width="100" align="center">
+                       <template #default="scope">
+                           <el-tag :type="getEventStatus(scope.row).type" size="small">
+                               {{ getEventStatus(scope.row).text }}
+                           </el-tag>
+                       </template>
+                   </el-table-column>
                </el-table>
                <div v-if="upcomingEvents.length === 0" class="text-center text-secondary p-4">
                    🎉 未来一周没有即将截止的任务
@@ -124,12 +131,13 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { User, Clock, Location, Calendar } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Location, User } from '@element-plus/icons-vue'
 import api from '../../api'
 
 const router = useRouter()
-const user = ref({ name: '' }) 
-const currentDate = new Date().toLocaleDateString('zh-CN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+const user = ref({})
+const currentDate = ref(new Date().toLocaleDateString('zh-CN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }))
 
 const classes = ref([])
 const announcements = ref([])
@@ -140,11 +148,19 @@ const loadingClasses = ref(true)
 const loadingEvents = ref(true)
 
 const fetchClasses = async () => {
+    console.log('Fetching classes...')
     try {
         const res = await api.get('/classes/my')
-        classes.value = res.data
-    } catch(e) { console.error(e)}
-    finally { loadingClasses.value = false }
+        console.log('Classes fetched:', res.data)
+        classes.value = res.data || []
+    } catch(e) { 
+        console.error('Fetch classes error:', e)
+        classes.value = [] // 确保为空数组，避免v-for报错
+    }
+    finally { 
+        loadingClasses.value = false 
+        console.log('loadingClasses set to false')
+    }
 }
 
 const fetchStats = async () => {
@@ -156,42 +172,92 @@ const fetchStats = async () => {
 
 const fetchAnnouncements = async () => {
    try {
-       const res = await api.get('/announcements?scope=global')
+       const res = await api.get('/announcements')
        announcements.value = res.data
    } catch(e) {}
 }
 
 const fetchEvents = async () => {
+    console.log('Fetching events...')
     try {
         const res = await api.get('/schedule/events')
+        console.log('Events fetched:', res.data)
         const now = new Date()
-        const nextWeek = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
         
-        upcomingEvents.value = res.data.filter(e => {
-            const t = new Date(e.start)
-            return t >= now && t <= nextWeek
-        }).slice(0, 5)
-    } catch(e) {}
-    finally { loadingEvents.value = false }
+        upcomingEvents.value = (res.data || []).map(e => {
+            return {
+                ...e,
+                end: e.end || e.start // 确保有截止时间
+            }
+        }).filter(e => {
+            const t = new Date(e.end)
+            return t >= now // 显示所有未来的任务，不仅限于一周内
+        }).sort((a, b) => new Date(a.end) - new Date(b.end)).slice(0, 5)
+    } catch(e) {
+        console.error('Fetch events error:', e)
+        upcomingEvents.value = []
+    }
+    finally { 
+        loadingEvents.value = false 
+        console.log('loadingEvents set to false')
+    }
 }
 
 const fetchMe = async () => {
-    // In a real app, this should be in Pinia store
+    try {
+        const res = await api.get('/me')
+        user.value = res.data
+    } catch(e) {}
 }
 
-const goToCourse = (id) => {
-    router.push(`/course/${id}`)
+const formatTime = (timeStr) => {
+    if (!timeStr) return ''
+    const date = new Date(timeStr)
+    return date.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
-const formatTime = (iso) => new Date(iso).toLocaleString('zh-CN', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'})
-const formatDateShort = (iso) => new Date(iso).toLocaleDateString('zh-CN', { month:'numeric', day:'numeric' })
+const formatDateShort = (timeStr) => {
+    if (!timeStr) return ''
+    const date = new Date(timeStr)
+    return date.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })
+}
 
-onMounted(() => {
-    fetchClasses()
-    fetchStats()
-    fetchAnnouncements()
-    fetchEvents()
-    fetchMe()
+const goToCourse = (classId) => {
+    // Placeholder for navigation
+}
+
+const handleEventClick = (row) => {
+  if (row.extendedProps && row.extendedProps.assignment_id) {
+    router.push(`/student/assignment/${row.extendedProps.assignment_id}`)
+  }
+}
+
+const getEventStatus = (event) => {
+  if (event.extendedProps && event.extendedProps.submitted) {
+    return { type: 'success', text: '已提交' }
+  }
+  const now = new Date()
+  const endDate = event.end ? new Date(event.end) : null
+  if (endDate && now > endDate) {
+    return { type: 'danger', text: '已截止' }
+  }
+  return { type: 'warning', text: '待提交' }
+}
+
+onMounted(async () => {
+  console.log('Dashboard mounted')
+  currentDate.value = new Date().toLocaleDateString('zh-CN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+  
+  // 并行加载，避免阻塞
+  Promise.allSettled([
+      fetchClasses(),
+      fetchStats(),
+      fetchAnnouncements(),
+      fetchEvents(),
+      fetchMe()
+  ]).then(() => {
+      console.log('All fetches completed (settled)')
+  })
 })
 </script>
 

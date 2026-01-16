@@ -6,11 +6,13 @@ import CourseDetail from '../views/student/CourseDetail.vue'
 import Forum from '../views/Forum.vue'
 import Messages from '../views/Messages.vue'
 import Schedule from '../views/student/Schedule.vue'
+import SubmitAssignment from '../views/student/SubmitAssignment.vue'
 
 // Teacher Views
 import TeacherDashboard from '../views/teacher/TeacherDashboard.vue'
 import TeacherClassDetail from '../views/teacher/TeacherClassDetail.vue'
 import TeacherGrading from '../views/teacher/TeacherGrading.vue'
+import ClassGrades from '../views/teacher/ClassGrades.vue'
 
 const routes = [
   { path: '/login', component: Login },
@@ -19,9 +21,11 @@ const routes = [
   { path: '/', component: Dashboard, alias: '/dashboard' },
   { path: '/courses', component: CourseList },
   { path: '/course/:id', component: CourseDetail },
+  { path: '/course/:id/grades', component: ClassGrades },
   { path: '/forum', component: Forum },
   { path: '/messages', component: Messages },
   { path: '/schedule', component: Schedule },
+  { path: '/student/assignment/:assignmentId', component: SubmitAssignment },
 
   // Teacher Routes
   { 
@@ -29,6 +33,7 @@ const routes = [
       children: [
           { path: 'dashboard', component: TeacherDashboard },
           { path: 'class/:id', component: TeacherClassDetail },
+          { path: 'class/:id/grades', component: ClassGrades },
           { path: 'grading/:assignmentId', component: TeacherGrading }
       ]
   }

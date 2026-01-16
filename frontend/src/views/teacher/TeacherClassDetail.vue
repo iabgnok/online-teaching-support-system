@@ -147,6 +147,53 @@
                  </el-table>
             </div>
         </el-tab-pane>
+
+        <!-- Tab 5: Gradebook -->
+        <el-tab-pane label="成绩管理" name="grades">
+             <div class="tab-actions mb-3 flex justify-between">
+                <span>成绩总览</span>
+                <el-button type="primary" size="small" @click="fetchGrades">刷新</el-button>
+            </div>
+            
+            <el-table :data="gradeTableData" style="width: 100%" v-loading="loadingGrades" border max-height="600">
+                <el-table-column fixed prop="student_no" label="学号" width="120" sortable />
+                <el-table-column fixed prop="name" label="姓名" width="100" />
+                
+                <!-- Dynamic Assignment Columns -->
+                <el-table-column 
+                    v-for="ass in gradeAssignments" 
+                    :key="ass.id" 
+                    :label="ass.title" 
+                    width="150"
+                    align="center"
+                >
+                    <template #header>
+                        <div class="truncate" :title="ass.title">{{ ass.title }}</div>
+                        <div class="text-xs text-gray-500">满分: {{ ass.total }}</div>
+                    </template>
+                    <template #default="scope">
+                        <span :class="getScoreClass(scope.row.scores[ass.id], ass.total)">
+                            {{ scope.row.scores[ass.id] !== null && scope.row.scores[ass.id] !== undefined ? scope.row.scores[ass.id] : '-' }}
+                        </span>
+                    </template>
+                </el-table-column>
+                
+                <!-- Summary Columns -->
+                <el-table-column label="平时分" align="center" width="100">
+                     <template #default="scope">{{ scope.row.summary.homework_avg || '-' }}</template>
+                </el-table-column>
+                <el-table-column label="考试分" align="center" width="100">
+                     <template #default="scope">{{ scope.row.summary.exam_avg || '-' }}</template>
+                </el-table-column>
+                <el-table-column label="总成绩" align="center" width="100" fixed="right">
+                     <template #default="scope">
+                         <strong class="text-lg" :class="getGradeClass(scope.row.summary.final)">
+                             {{ scope.row.summary.final || '-' }}
+                         </strong>
+                     </template>
+                </el-table-column>
+            </el-table>
+        </el-tab-pane>
     </el-tabs>
 
     <!-- Create Assignment Dialog -->
@@ -425,6 +472,39 @@ const saveAttendanceChanges = async () => {
     }
 }
 
+// Grades Logic
+const loadingGrades = ref(false)
+const gradeTableData = ref([])
+const gradeAssignments = ref([])
+
+const fetchGrades = async () => {
+    loadingGrades.value = true
+    try {
+        const res = await api.get(`/classes/${classId}/grades`)
+        gradeAssignments.value = res.data.assignments
+        gradeTableData.value = res.data.students
+    } catch (err) {
+        console.error(err)
+        // ElMessage.error('无法获取成绩数据')
+    } finally {
+        loadingGrades.value = false
+    }
+}
+
+const getScoreClass = (score, total) => {
+    if (score === null || score === undefined) return 'text-gray-400'
+    const ratio = score / total
+    if (ratio < 0.6) return 'text-red-500 font-bold'
+    if (ratio >= 0.9) return 'text-green-600 font-bold'
+    return ''
+}
+
+const getGradeClass = (score) => {
+    if (!score) return ''
+    if (score < 60) return 'text-red-600'
+    if (score >= 90) return 'text-green-600'
+    return ''
+}
 
 const formatTime = (iso) => new Date(iso).toLocaleString('zh-CN', { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' })
 const formatDate = (iso) => new Date(iso).toLocaleDateString('zh-CN')
@@ -442,6 +522,7 @@ onMounted(() => {
     fetchAssignments()
     fetchMaterials()
     fetchAttendanceList()
+    fetchGrades()
 })
 </script>
 
@@ -467,5 +548,11 @@ onMounted(() => {
     margin-top: 10px;
     color: #606266;
     font-size: 14px;
+}
+
+.truncate {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 </style>

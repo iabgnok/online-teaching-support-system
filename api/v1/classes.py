@@ -336,3 +336,86 @@ def get_class_assignments(class_id):
         data.append(item)
         
     return jsonify(data)
+
+@classes_bp.route('/<int:class_id>/grades', methods=['GET'])
+@login_required
+def get_class_grades(class_id):
+    """获取班级成绩单"""
+    # 权限检查
+    is_teacher = False
+    if current_user.role == 'teacher':
+        teacher = current_user.teacher_profile
+        has_access = TeacherClass.query.filter_by(teacher_id=teacher.teacher_id, class_id=class_id).first()
+        if not has_access:
+            return jsonify({'error': 'Unauthorized'}), 403
+        is_teacher = True
+    elif current_user.role == 'student':
+        student = current_user.student_profile
+        has_access = StudentClass.query.filter_by(student_id=student.student_id, class_id=class_id).first()
+        if not has_access:
+           return jsonify({'error': 'Unauthorized'}), 403
+    else:
+         # admin could be allowed
+         pass
+
+    # 1. Get Assignments (Columns)
+    assignments = Assignment.query.filter_by(class_id=class_id).order_by(Assignment.deadline).all()
+    ass_headers = [{
+        'id': a.assignment_id,
+        'title': a.title,
+        'total': float(a.total_score),
+        'type': a.type
+    } for a in assignments]
+    
+    # 2. Get Students (Rows)
+    query = StudentClass.query.filter_by(class_id=class_id, status=1)
+    if not is_teacher: # Student only sees self
+        query = query.filter_by(student_id=current_user.student_profile.student_id)
+        
+    enrollments = query.all()
+    student_ids = [e.student_id for e in enrollments]
+    
+    # 3. Get Submissions (Cells)
+    submissions = Submission.query.filter(
+        Submission.assignment_id.in_([a.assignment_id for a in assignments]),
+        Submission.student_id.in_(student_ids)
+    ).all()
+    
+    # Map: student_id -> assignment_id -> score
+    sub_map = {}
+    for s in submissions:
+        if s.student_id not in sub_map:
+            sub_map[s.student_id] = {}
+        sub_map[s.student_id][s.assignment_id] = float(s.score) if s.score is not None else None
+
+    # 4. Get Final Grades (Summary)
+    grades = Grade.query.filter(
+        Grade.class_id == class_id,
+        Grade.student_id.in_(student_ids)
+    ).all()
+    grade_map = {g.student_id: g for g in grades}
+
+    # Construct Response
+    rows = []
+    for enr in enrollments:
+        sid = enr.student.student_id
+        final_g = grade_map.get(sid)
+        
+        row = {
+            'student_id': sid,
+            'student_no': enr.student.student_no,
+            'name': enr.student.user.real_name,
+            'scores': sub_map.get(sid, {}), # {assignment_id: score}
+            'summary': {
+                'homework_avg': float(final_g.homework_avg) if final_g and final_g.homework_avg is not None else None,
+                'exam_avg': float(final_g.exam_avg) if final_g and final_g.exam_avg is not None else None,
+                'final': float(final_g.final_grade) if final_g and final_g.final_grade is not None else None,
+                'is_finalized': final_g.is_finalized if final_g else False
+            }
+        }
+        rows.append(row)
+        
+    return jsonify({
+        'assignments': ass_headers,
+        'students': rows
+    })
