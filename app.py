@@ -14,6 +14,8 @@ from werkzeug.utils import secure_filename
 from models import (
     Users, Admin, Student, Teacher, Course, TeachingClass, StudentClass, TeacherClass, 
     Assignment, Submission, Grade, Material, Department, Announcement, Attendance, AttendanceRecord, db,
+    # 新成绩系统
+    GradeCategory, GradeItem, StudentGradeScore, StudentFinalGrade,
     # 视图模型
     VStudentMyCourses, VStudentMyAssignments, VStudentMyGrades,
     VTeacherMyClasses, VTeacherStudentList, VTeacherSubmissionStatus,
@@ -30,11 +32,15 @@ from api.v1 import api_v1
 from api.v1.classes import classes_bp
 from api.v1.assignments import assignments_bp
 from api.v1.attendance import attendance_bp
+from api.v1.grades import grades_bp
+from api.v1.admin import admin_bp
 
 app.register_blueprint(api_v1)
 app.register_blueprint(classes_bp, url_prefix='/api/v1/classes')
 app.register_blueprint(assignments_bp, url_prefix='/api/v1/assignments')
 app.register_blueprint(attendance_bp, url_prefix='/api/v1/attendance')
+app.register_blueprint(grades_bp)
+app.register_blueprint(admin_bp, url_prefix='/api/v1/admin')
 
 
 # ==================== 扩展初始化 ====================
@@ -42,6 +48,11 @@ db.init_app(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 login_manager.login_message_category = 'info'
+
+# Session配置
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_SECURE'] = False  # 开发环境使用HTTP
+app.config['SESSION_COOKIE_HTTPONLY'] = True
 
 # 确保上传目录存在
 os.makedirs(app.config['MATERIALS_FOLDER'], exist_ok=True)
@@ -381,9 +392,15 @@ def create_announcement():
         scope_type=scope_type,
         target_class_id=target_class_id
     )
-    db.session.add(announcement)
-    db.session.commit()
-    flash('公告发布成功！', 'success')
+    try:
+        db.session.add(announcement)
+        db.session.commit()
+        flash('公告发布成功！', 'success')
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f"创建公告失败: {e}")
+        flash(f'创建公告失败: {e}', 'danger')
+        
     return redirect(request.referrer)
 
 @app.route('/announcement/delete/<int:announcement_id>', methods=['POST'])
@@ -404,9 +421,15 @@ def delete_announcement(announcement_id):
         flash('没有权限删除此公告。', 'danger')
         return redirect(request.referrer)
     
-    db.session.delete(announcement)
-    db.session.commit()
-    flash('公告已删除。', 'success')
+    try:
+        db.session.delete(announcement)
+        db.session.commit()
+        flash('公告已删除。', 'success')
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f"删除公告失败: {e}")
+        flash(f'删除公告失败: {e}', 'danger')
+
     return redirect(request.referrer)
 
 
@@ -462,7 +485,13 @@ def student_checkin():
         record.remarks = '迟到签到'
         flash('⚠️ 您已迟到，但签到成功。', 'warning')
         
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f"学生签到失败: {e}")
+        flash(f'签到时发生错误: {e}', 'danger')
+
     return redirect(url_for('student_dashboard'))
 
 
@@ -550,9 +579,14 @@ def admin_toggle_status(user_id):
             return redirect(url_for('admin_user_management'))
     else:
         user.status = 1 - user.status
-        db.session.commit()
-        status_text = "激活" if user.status == 1 else "禁用"
-        flash(f'用户 {user.username} 的状态已更新为 {status_text}。', 'success')
+        try:
+            db.session.commit()
+            status_text = "激活" if user.status == 1 else "禁用"
+            flash(f'用户 {user.username} 的状态已更新为 {status_text}。', 'success')
+        except Exception as e:
+            db.session.rollback()
+            app.logger.error(f"切换用户状态失败: {e}")
+            flash(f'更新用户状态失败: {e}', 'danger')
     
     return redirect(url_for('admin_user_management'))
 
@@ -926,8 +960,13 @@ def admin_permissions():
             else:
                 old_level = admin.permission_level
                 admin.permission_level = int(new_permission)
-                db.session.commit()
-                flash(f'已将 {admin.name} 的权限从级别 {old_level} 更改为级别 {new_permission}', 'success')
+                try:
+                    db.session.commit()
+                    flash(f'已将 {admin.user.real_name} 的权限从级别 {old_level} 更改为级别 {new_permission}', 'success')
+                except Exception as e:
+                    db.session.rollback()
+                    app.logger.error(f"更新权限失败: {e}")
+                    flash(f'更新权限失败: {e}', 'danger')
         else:
             flash('未找到该管理员', 'danger')
         
@@ -3783,10 +3822,10 @@ def admin_query_export():
         if show_details:
             writer.writerow(['学号', '姓名', '课程名称', '教学班', '作业平均', '考试平均', '教师评分', '最终成绩', 
                            '已交作业', '缺交作业', '已交考试', '缺交考试', '作业完成率'])
-            for grade, student, tc, course in results:
+            for grade, student, teaching_class, course in results:
                 # 计算作业考试缺交情况
-                all_homeworks = Assignment.query.filter_by(class_id=tc.class_id, type='homework', status=1).all()
-                all_exams = Assignment.query.filter_by(class_id=tc.class_id, type='exam', status=1).all()
+                all_homeworks = Assignment.query.filter_by(class_id=teaching_class.class_id, type='homework', status=1).all()
+                all_exams = Assignment.query.filter_by(class_id=teaching_class.class_id, type='exam', status=1).all()
                 
                 homework_submitted = sum(1 for hw in all_homeworks 
                                        if Submission.query.filter_by(assignment_id=hw.assignment_id, student_id=student.student_id)
@@ -3998,6 +4037,8 @@ if __name__ == '__main__':
     with app.app_context():
         # 创建所有表
         db.create_all()
+        # 确保默认部门存在
+        get_or_create_department('系统管理部')
         print("数据库连接并初始化完成。")
 
         # --- 新增：检查并创建初始管理员 ---
@@ -4082,14 +4123,61 @@ if __name__ == '__main__':
                     print(f"❌ Admin表记录修复失败: {e}")
             else:
                 print("管理员账户 'admin' 已存在，跳过创建。")
-        # ------------------------------------
+    # ------------------------------------
     
-    # 启动Flask应用
-    print("\n" + "="*60)
-    print(" 🚀 后端服务已启动 (Backend running on port 5000)")
-    print(" 🌐 前端访问地址 (Vue Frontend):")
-    print("    👉 http://localhost:5174 (当前活跃)")
-    print("    👉 http://localhost:5173 (备用)")
-    print("="*60 + "\n")
+    # 启动前端并运行 Flask 应用
+    import threading
+    import subprocess
+    import socket
+    import time
+    import webbrowser
+    import os
 
-    app.run(debug=True)
+    def is_port_in_use(port):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            return s.connect_ex(('localhost', port)) == 0
+
+    def start_frontend_and_open_browser():
+        vue_port = 5173
+        frontend_started = False
+        
+        if not is_port_in_use(vue_port):
+            print(f"⏳ 检测到前端未启动 (端口 {vue_port} 空闲)，正在启动 Vue 前端...")
+            frontend_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'frontend')
+            # 兼容 Windows 
+            npm_cmd = 'npm.cmd' if os.name == 'nt' else 'npm'
+            
+            try:
+                subprocess.Popen([npm_cmd, 'run', 'dev'], cwd=frontend_dir, shell=True)
+                print("✅ Vue 前端启动指令已发送，正在等待启动...")
+                frontend_started = True
+                
+                # 等待几秒让它启动
+                for _ in range(15):
+                    if is_port_in_use(vue_port):
+                        break
+                    time.sleep(1)
+            except Exception as e:
+                print(f"❌ 启动 Vue 前端失败: {e}")
+        else:
+             print(f"✅ 检测到前端已在端口 {vue_port} 运行")
+             frontend_started = True
+
+        if frontend_started:
+            frontend_url = f'http://localhost:{vue_port}'
+            print("\n" + "="*60)
+            print(" 🚀 后端服务已启动 (Backend running on port 5000)")
+            print(f" 🌐 前端访问地址 (Vue Frontend): {frontend_url}")
+            print("="*60 + "\n")
+            # 尝试打开浏览器
+            try:
+                webbrowser.open(frontend_url)
+            except:
+                pass
+
+    # 仅在主进程中检查/启动前端 (避免 Reload 时重复启动)
+    if os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
+        # 使用线程启动，以免阻塞 Flask 启动
+        threading.Thread(target=start_frontend_and_open_browser).start()
+
+    app.run(debug=True, port=5000)

@@ -4,6 +4,7 @@ import axios from 'axios'
 const api = axios.create({
   baseURL: '/api/v1',
   timeout: 5000, // 5秒超时
+  withCredentials: true, // 发送cookies
   headers: {
     'Content-Type': 'application/json'
   }

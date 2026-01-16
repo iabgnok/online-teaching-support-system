@@ -2,10 +2,11 @@ from flask import Blueprint
 
 api_v1 = Blueprint('api_v1', __name__, url_prefix='/api/v1')
 
-from . import announcements, attendance, forum, messages, auth, schedule, classes, assignments, student
+from . import announcements, attendance, forum, messages, auth, schedule, classes, assignments, student, admin
 
 # Child blueprints are registered in the main app to avoid nesting errors
 from .classes import classes_bp
 from .assignments import assignments_bp
 from .attendance import attendance_bp
+from .admin import admin_bp
 

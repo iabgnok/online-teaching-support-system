@@ -145,7 +145,9 @@
              <div class="detail-content">
                  <div class="post-header-detail">
                      <span class="subreddit-prefix">r/Class_{{ classId }}</span>
-                     <span class="posted-by">发布者 u/{{ currentPost.author_name }} • {{ formatDate(currentPost.created_at) }}</span>
+                     <span class="posted-by">发布者 u/{{ currentPost.author_name }}</span>
+                     <el-tag v-if="currentPost.author_role" size="small" :type="getRoleTagType(currentPost.author_role)" effect="plain" style="margin-left: 4px">{{ getRoleName(currentPost.author_role) }}</el-tag>
+                     <span class="posted-by"> • {{ formatDate(currentPost.created_at) }}</span>
                  </div>
                  
                  <h2 class="detail-title">
@@ -251,6 +253,24 @@ onMounted(async () => {
 const formatDate = (dateStr) => {
     if(!dateStr) return ''
     return new Date(dateStr).toLocaleString()
+}
+
+const getRoleName = (role) => {
+    const roleMap = {
+        'teacher': '教师',
+        'student': '学生',
+        'admin': '管理员'
+    }
+    return roleMap[role] || role
+}
+
+const getRoleTagType = (role) => {
+    const typeMap = {
+        'teacher': 'warning',
+        'student': '',
+        'admin': 'danger'
+    }
+    return typeMap[role] || ''
 }
 
 const loadPosts = async () => {

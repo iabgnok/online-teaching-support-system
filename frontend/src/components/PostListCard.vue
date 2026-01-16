@@ -12,6 +12,7 @@
         <div class="post-header">
             <span class="subreddit-prefix">r/Class_{{ post.class_id || 'General' }}</span>
             <span class="posted-by">发布者 u/{{ post.author_name }}</span>
+            <el-tag v-if="post.author_role" size="small" :type="getRoleTagType(post.author_role)" effect="plain" style="margin-left: 4px">{{ getRoleName(post.author_role) }}</el-tag>
             <span class="post-time">{{ formatDate(post.created_at) }}</span>
         </div>
         
@@ -94,6 +95,24 @@ const formatDate = (dateStr) => {
 const getPreview = (content) => {
     if (!content) return ''
     return content.length > 150 ? content.substring(0, 150) + '...' : content
+}
+
+const getRoleName = (role) => {
+    const roleMap = {
+        'teacher': '教师',
+        'student': '学生',
+        'admin': '管理员'
+    }
+    return roleMap[role] || role
+}
+
+const getRoleTagType = (role) => {
+    const typeMap = {
+        'teacher': 'warning',
+        'student': '',
+        'admin': 'danger'
+    }
+    return typeMap[role] || ''
 }
 
 const handleCommand = (cmd) => {

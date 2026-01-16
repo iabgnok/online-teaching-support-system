@@ -13,15 +13,31 @@ import TeacherDashboard from '../views/teacher/TeacherDashboard.vue'
 import TeacherClassDetail from '../views/teacher/TeacherClassDetail.vue'
 import TeacherGrading from '../views/teacher/TeacherGrading.vue'
 import ClassGrades from '../views/teacher/ClassGrades.vue'
+import GradeConfig from '../views/teacher/GradeConfig.vue'
+import GradeInput from '../views/teacher/GradeInput.vue'
+import GradeStatistics from '../views/teacher/GradeStatistics.vue'
+
+// Student Grade View
+import MyGrades from '../views/student/MyGrades.vue'
+
+// Admin Views
+import AdminDashboard from '../views/admin/AdminDashboard.vue'
+import UserManagement from '../views/admin/UserManagement.vue'
+import QueryPage from '../views/admin/QueryPage.vue'
+
+// Common Views
+import Profile from '../views/Profile.vue'
 
 const routes = [
   { path: '/login', component: Login },
+  { path: '/profile', component: Profile },
   
   // Student / General Routes (Legacy Root)
   { path: '/', component: Dashboard, alias: '/dashboard' },
   { path: '/courses', component: CourseList },
   { path: '/course/:id', component: CourseDetail },
   { path: '/course/:id/grades', component: ClassGrades },
+  { path: '/my-grades', component: MyGrades },
   { path: '/forum', component: Forum },
   { path: '/messages', component: Messages },
   { path: '/schedule', component: Schedule },
@@ -34,7 +50,20 @@ const routes = [
           { path: 'dashboard', component: TeacherDashboard },
           { path: 'class/:id', component: TeacherClassDetail },
           { path: 'class/:id/grades', component: ClassGrades },
+          { path: 'class/:id/grade-config', component: GradeConfig },
+          { path: 'class/:id/grade-item/:itemId', component: GradeInput },
+          { path: 'class/:id/grade-statistics', component: GradeStatistics },
           { path: 'grading/:assignmentId', component: TeacherGrading }
+      ]
+  },
+
+  // Admin Routes
+  { 
+      path: '/admin', 
+      children: [
+          { path: 'dashboard', component: AdminDashboard },
+          { path: 'users', component: UserManagement },
+          { path: 'query', component: QueryPage }
       ]
   }
 ]
@@ -48,15 +77,26 @@ const router = createRouter({
 router.beforeEach((to, from, next) => {
   const role = localStorage.getItem('user_role')
   
-  // Protect Student Routes from Teachers (Optional, but good for UX)
-  if (to.path === '/' && role === 'teacher') {
-      next('/teacher/dashboard')
+  // Redirect to appropriate dashboard based on role
+  if (to.path === '/') {
+      if (role === 'teacher') {
+          next('/teacher/dashboard')
+          return
+      } else if (role === 'admin') {
+          next('/admin/dashboard')
+          return
+      }
+  }
+  
+  // Protect Teacher Routes
+  if (to.path.startsWith('/teacher') && role !== 'teacher') {
+      next('/')
       return
   }
   
-  // Protect Teacher Routes from Students
-  if (to.path.startsWith('/teacher') && role !== 'teacher') {
-      next('/') // Redirect to student dashboard
+  // Protect Admin Routes
+  if (to.path.startsWith('/admin') && role !== 'admin') {
+      next('/')
       return
   }
   

@@ -6,6 +6,7 @@
       <div class="comment-content-wrapper">
         <div class="comment-header">
            <span class="author">{{ comment.author_name }}</span>
+           <el-tag v-if="comment.author_role" size="small" :type="getRoleTagType(comment.author_role)" effect="plain" style="margin-left: 4px">{{ getRoleName(comment.author_role) }}</el-tag>
            <span class="meta" v-if="comment.is_accepted">
              <el-tag size="small" type="success" effect="plain">OP</el-tag>
            </span>
@@ -110,6 +111,24 @@ const canEdit = computed(() => {
 const formatDate = (dateStr) => {
     if(!dateStr) return ''
     return new Date(dateStr).toLocaleString()
+}
+
+const getRoleName = (role) => {
+    const roleMap = {
+        'teacher': '教师',
+        'student': '学生',
+        'admin': '管理员'
+    }
+    return roleMap[role] || role
+}
+
+const getRoleTagType = (role) => {
+    const typeMap = {
+        'teacher': 'warning',
+        'student': '',
+        'admin': 'danger'
+    }
+    return typeMap[role] || ''
 }
 
 const toggleReply = () => {

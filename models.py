@@ -302,7 +302,7 @@ class Submission(db.Model):
 # ==================== 成绩管理模块 ====================
 
 class Grade(db.Model):
-    """成绩表：存储最终归档的成绩"""
+    """成绩表：存储最终归档的成绩（保留用于兼容）"""
     __tablename__ = 'Grade'
 
     grade_id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
@@ -333,7 +333,6 @@ class Grade(db.Model):
         """成绩是否已锁定"""
         return self.is_finalized
     
-
     def finalize(self, teacher_id, formula='hw*0.3+exam*0.5+eval*0.2'):
         """归档并锁定成绩"""
         from datetime import datetime
@@ -342,6 +341,99 @@ class Grade(db.Model):
         self.calculated_by = teacher_id
         self.calculated_at = datetime.now()
         self.calculation_formula = formula
+
+
+class GradeCategory(db.Model):
+    """成绩分类/组别表"""
+    __tablename__ = 'GradeCategory'
+    
+    id = db.Column(db.BigInteger, primary_key=True)
+    class_id = db.Column(db.BigInteger, db.ForeignKey('TeachingClass.class_id'), nullable=False)
+    name = db.Column(db.String(50), nullable=False, comment='分类名称，如：平时成绩、作业、考试')
+    weight = db.Column(db.Numeric(5, 2), nullable=False, default=0, comment='权重（百分比），如30表示30%')
+    description = db.Column(db.String(200), comment='说明')
+    order = db.Column(db.Integer, default=0, comment='排序')
+    created_at = db.Column(db.DateTime(timezone=True), default=func.now())
+    
+    # 关系
+    items = db.relationship('GradeItem', backref='category', lazy='dynamic', cascade='all, delete-orphan')
+
+
+class GradeItem(db.Model):
+    """成绩项表（可自定义的成绩项）"""
+    __tablename__ = 'GradeItem'
+    
+    id = db.Column(db.BigInteger, primary_key=True)
+    category_id = db.Column(db.BigInteger, db.ForeignKey('GradeCategory.id'), nullable=False)
+    class_id = db.Column(db.BigInteger, db.ForeignKey('TeachingClass.class_id'), nullable=False)
+    
+    name = db.Column(db.String(100), nullable=False, comment='成绩项名称，如：期中考试、实验报告1')
+    item_type = db.Column(db.String(20), nullable=False, comment='类型：assignment, exam, attendance, manual')
+    weight = db.Column(db.Numeric(5, 2), comment='在分类内的权重')
+    max_score = db.Column(db.Numeric(5, 2), default=100, comment='满分')
+    
+    # 关联字段
+    related_assignment_id = db.Column(db.BigInteger, db.ForeignKey('Assignment.assignment_id'), comment='关联的作业/考试ID')
+    
+    # 配置
+    auto_calculate = db.Column(db.Boolean, default=False, comment='是否自动计算（如考勤）')
+    is_published = db.Column(db.Boolean, default=False, comment='是否对学生公开')
+    
+    created_at = db.Column(db.DateTime(timezone=True), default=func.now())
+    created_by = db.Column(db.BigInteger, db.ForeignKey('Teacher.teacher_id'))
+    
+    # 关系
+    scores = db.relationship('StudentGradeScore', backref='grade_item', lazy='dynamic', cascade='all, delete-orphan')
+
+
+class StudentGradeScore(db.Model):
+    """学生成绩明细表"""
+    __tablename__ = 'StudentGradeScore'
+    
+    id = db.Column(db.BigInteger, primary_key=True)
+    grade_item_id = db.Column(db.BigInteger, db.ForeignKey('GradeItem.id'), nullable=False)
+    student_id = db.Column(db.BigInteger, db.ForeignKey('Student.student_id'), nullable=False)
+    class_id = db.Column(db.BigInteger, db.ForeignKey('TeachingClass.class_id'), nullable=False)
+    
+    score = db.Column(db.Numeric(5, 2), comment='得分')
+    percentage = db.Column(db.Numeric(5, 2), comment='得分率（百分制）')
+    
+    # 审计
+    graded_by = db.Column(db.BigInteger, db.ForeignKey('Teacher.teacher_id'))
+    graded_at = db.Column(db.DateTime(timezone=True))
+    remarks = db.Column(db.String(500))
+    
+    __table_args__ = (
+        db.UniqueConstraint('grade_item_id', 'student_id', name='UK_GradeScore_Item_Student'),
+    )
+
+
+class StudentFinalGrade(db.Model):
+    """学生总评成绩表"""
+    __tablename__ = 'StudentFinalGrade'
+    
+    id = db.Column(db.BigInteger, primary_key=True)
+    student_id = db.Column(db.BigInteger, db.ForeignKey('Student.student_id'), nullable=False)
+    class_id = db.Column(db.BigInteger, db.ForeignKey('TeachingClass.class_id'), nullable=False)
+    
+    # 各分类得分
+    category_scores = db.Column(db.JSON, comment='各分类得分详情，JSON格式')
+    
+    # 总评
+    total_score = db.Column(db.Numeric(5, 2), comment='总评成绩')
+    rank = db.Column(db.Integer, comment='班级排名')
+    rank_percentage = db.Column(db.Numeric(5, 2), comment='排名百分位')
+    
+    # 状态
+    is_finalized = db.Column(db.Boolean, default=False, comment='是否已归档')
+    is_published = db.Column(db.Boolean, default=False, comment='是否对学生公开')
+    
+    calculated_at = db.Column(db.DateTime(timezone=True))
+    finalized_at = db.Column(db.DateTime(timezone=True))
+    
+    __table_args__ = (
+        db.UniqueConstraint('student_id', 'class_id', name='UK_FinalGrade_Student_Class'),
+    )
 
 
 # ==================== Phase 1: 增强功能模块 ====================

@@ -2,7 +2,13 @@
   <div class="dashboard-container">
     <div class="welcome-banner mb-4">
       <h2>👋 欢迎回来，{{ user.real_name || user.name || '同学' }}</h2>
-      <p class="text-secondary">{{ currentDate }}</p>
+      <div v-if="user.role === 'student' && user.student_no" class="text-secondary mb-2">
+          <el-tag size="small" effect="plain" class="mr-2">{{ user.dept_name }}</el-tag>
+          <span class="mr-2 font-bold">{{ user.major }}</span>
+          <span class="mr-2">{{ user.class_name }}</span>
+          <span>{{ user.student_no }}</span>
+      </div>
+      <p class="text-secondary text-sm">{{ currentDate }}</p>
     </div>
 
     <!-- Stats Row -->
@@ -56,10 +62,10 @@
                         <div class="course-footer flex justify-between items-center text-sm border-t pt-2 mt-2">
                              <div>
                                 <span class="text-secondary">待提交: </span>
-                                <span :class="{'text-danger font-bold': course.pending_count > 0}">{{ course.pending_count }}</span>
+                                <span :class="{'text-danger font-bold': course.pending_count > 0}">{{ course.pending_count || 0 }}</span>
                              </div>
                              <div>
-                                <el-tag v-if="course.final_grade !== null" type="success" size="small">{{ course.final_grade.toFixed(1) }}分</el-tag>
+                                <el-tag v-if="course.final_grade !== null && course.final_grade !== undefined" type="success" size="small">{{ Number(course.final_grade).toFixed(1) }}分</el-tag>
                                 <span v-else class="text-secondary">-</span>
                              </div>
                         </div>
@@ -142,7 +148,12 @@ const currentDate = ref(new Date().toLocaleDateString('zh-CN', { weekday: 'long'
 const classes = ref([])
 const announcements = ref([])
 const upcomingEvents = ref([])
-const stats = ref({ total_courses: 0, total_pending: 0, average_grade: 0, graded_count: 0 })
+const stats = ref({ 
+  total_courses: 0, 
+  total_pending: 0, 
+  average_grade: 0, 
+  graded_count: 0 
+})
 
 const loadingClasses = ref(true)
 const loadingEvents = ref(true)
@@ -166,8 +177,20 @@ const fetchClasses = async () => {
 const fetchStats = async () => {
     try {
         const res = await api.get('/classes/student/stats')
-        stats.value = res.data
-    } catch(e) {}
+        stats.value = res.data || { 
+          total_courses: 0, 
+          total_pending: 0, 
+          average_grade: 0, 
+          graded_count: 0 
+        }
+    } catch(e) {
+        stats.value = { 
+          total_courses: 0, 
+          total_pending: 0, 
+          average_grade: 0, 
+          graded_count: 0 
+        }
+    }
 }
 
 const fetchAnnouncements = async () => {
@@ -184,15 +207,29 @@ const fetchEvents = async () => {
         console.log('Events fetched:', res.data)
         const now = new Date()
         
-        upcomingEvents.value = (res.data || []).map(e => {
-            return {
-                ...e,
-                end: e.end || e.start // 确保有截止时间
+        // 使用Map去重，避免重复显示相同的任务
+        const uniqueEvents = new Map()
+        
+        ;(res.data || []).forEach(e => {
+            const assignmentId = e.extendedProps?.assignment_id
+            if (assignmentId && !uniqueEvents.has(assignmentId)) {
+                uniqueEvents.set(assignmentId, {
+                    ...e,
+                    end: e.end || e.start // 确保有截止时间
+                })
             }
-        }).filter(e => {
-            const t = new Date(e.end)
-            return t >= now // 显示所有未来的任务，不仅限于一周内
-        }).sort((a, b) => new Date(a.end) - new Date(b.end)).slice(0, 5)
+        })
+        
+        upcomingEvents.value = Array.from(uniqueEvents.values())
+            .filter(e => {
+                const t = new Date(e.end)
+                const isNotSubmitted = !e.extendedProps?.submitted && 
+                                      e.extendedProps?.submission_status !== 'submitted' && 
+                                      e.extendedProps?.submission_status !== 'graded'
+                return t >= now && isNotSubmitted // 只显示未来且未提交的任务
+            })
+            .sort((a, b) => new Date(a.end) - new Date(b.end))
+            .slice(0, 5)
     } catch(e) {
         console.error('Fetch events error:', e)
         upcomingEvents.value = []
@@ -223,7 +260,12 @@ const formatDateShort = (timeStr) => {
 }
 
 const goToCourse = (classId) => {
-    // Placeholder for navigation
+    console.log('Navigating to course:', classId)
+    if (!classId) {
+        ElMessage.warning('课程ID无效')
+        return
+    }
+    router.push(`/course/${classId}`)
 }
 
 const handleEventClick = (row) => {
@@ -233,9 +275,15 @@ const handleEventClick = (row) => {
 }
 
 const getEventStatus = (event) => {
-  if (event.extendedProps && event.extendedProps.submitted) {
-    return { type: 'success', text: '已提交' }
+  // 优先检查批改状态
+  if (event.extendedProps?.graded || event.extendedProps?.submission_status === 'graded') {
+    return { type: 'success', text: '已批改' }
   }
+  // 检查提交状态
+  if (event.extendedProps?.submitted || event.extendedProps?.submission_status === 'submitted') {
+    return { type: 'info', text: '已提交' }
+  }
+  // 检查截止时间
   const now = new Date()
   const endDate = event.end ? new Date(event.end) : null
   if (endDate && now > endDate) {

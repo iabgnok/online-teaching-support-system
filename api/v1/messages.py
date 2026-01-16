@@ -51,6 +51,12 @@ def send_message():
     
     if not recipient_id or not content:
         return jsonify({'error': 'Recipient and content are required'}), 400
+    
+    # 确保recipient_id是整数类型
+    try:
+        recipient_id = int(recipient_id)
+    except (ValueError, TypeError):
+        return jsonify({'error': 'Invalid recipient ID format'}), 400
         
     recipient = Users.query.get(recipient_id)
     if not recipient:

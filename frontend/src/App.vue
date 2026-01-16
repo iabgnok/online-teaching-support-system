@@ -1,62 +1,76 @@
 <template>
-  <el-container class="app-layout">
-    <el-header class="main-header" height="60px">
-      <div class="header-content">
-        <h1 class="logo">在线教学支持系统</h1>
-        <div class="nav-links" v-if="userRole">
-           <router-link 
-             v-for="link in navigationLinks" 
-             :key="link.path" 
-             :to="link.path" 
-             class="nav-link"
-           >
-             {{ link.label }}
-           </router-link>
-           <a href="#" @click.prevent="logout" class="nav-link">退出</a>
+  <div v-if="showLayout">
+    <el-container class="app-layout">
+      <el-header class="main-header" height="60px">
+        <div class="header-content">
+          <h1 class="logo">在线教学支持系统</h1>
+          <div class="nav-links">
+            <router-link 
+              v-for="link in navigationLinks" 
+              :key="link.path" 
+              :to="link.path" 
+              class="nav-link"
+            >
+              {{ link.label }}
+            </router-link>
+            <a href="#" @click.prevent="logout" class="nav-link">退出</a>
+          </div>
         </div>
-      </div>
-    </el-header>
-    <el-main class="main-content">
-      <router-view :key="$route.fullPath"></router-view>
-    </el-main>
-  </el-container>
+      </el-header>
+      <el-main class="main-content">
+        <router-view></router-view>
+      </el-main>
+    </el-container>
+  </div>
+  <router-view v-else></router-view>
 </template>
 
 <script setup>
-import { ref, watchEffect, computed } from 'vue'
-import api from './api'
+import { ref, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import api from './api'
 
 const router = useRouter()
 const route = useRoute()
-const userRole = ref('')
+const userRole = ref(localStorage.getItem('user_role') || 'student')
 
-// Simple way to keep role updated without a store: check on route change
-watchEffect(() => {
-    // Dependency on route.path ensures this runs on navigation
-    const path = route.path 
-    userRole.value = localStorage.getItem('user_role') || 'student'
+// 监听路由变化，实时更新用户角色 (Login.vue 登录后会跳转，触发此更新)
+import { watch } from 'vue'
+watch(() => route.path, () => {
+  const storedRole = localStorage.getItem('user_role')
+  if (storedRole) {
+    userRole.value = storedRole
+  }
+})
+
+const showLayout = computed(() => {
+  return route.path !== '/login'
 })
 
 const navigationLinks = computed(() => {
-  const common = [
-    { path: '/forum', label: '论坛' },
-    { path: '/messages', label: '站内信' }
-  ]
-  
-  if (userRole.value === 'teacher') {
+  if (userRole.value === 'admin') {
+    return [
+      { path: '/admin/dashboard', label: '管理员控制台' },
+      { path: '/messages', label: '站内信' },
+      { path: '/profile', label: '账户信息' }
+    ]
+  } else if (userRole.value === 'teacher') {
     return [
       { path: '/teacher/dashboard', label: '工作台' },
-      ...common
+      { path: '/forum', label: '论坛' },
+      { path: '/messages', label: '站内信' },
+      { path: '/profile', label: '账户信息' }
     ]
   } else {
     return [
       { path: '/', label: '首页' },
       { path: '/schedule', label: '日程' },
-      ...common
+      { path: '/my-grades', label: '我的成绩' },
+      { path: '/forum', label: '论坛' },
+      { path: '/messages', label: '站内信' },
+      { path: '/profile', label: '账户信息' }
     ]
   }
-  return [] // Default to an empty array if role is not set or recognized
 })
 
 const logout = async () => {

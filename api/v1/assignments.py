@@ -24,6 +24,9 @@ def create_assignment():
         
     # Check permissions
     teacher = current_user.teacher_profile
+    if not teacher:
+        return jsonify({'error': 'Teacher profile not found'}), 404
+        
     has_access = TeacherClass.query.filter_by(teacher_id=teacher.teacher_id, class_id=class_id).first()
     if not has_access:
         return jsonify({'error': 'You do not teach this class'}), 403
@@ -35,25 +38,31 @@ def create_assignment():
              deadline = datetime.fromisoformat(deadline_str.replace('Z', '+00:00'))
         else:
              deadline = datetime.strptime(deadline_str, "%Y-%m-%d %H:%M:%S")
-    except ValueError:
-        return jsonify({'error': 'Invalid date format'}), 400
+    except ValueError as e:
+        return jsonify({'error': f'Invalid date format: {str(e)}'}), 400
+    except Exception as e:
+        return jsonify({'error': f'Error parsing date: {str(e)}'}), 400
 
-    new_assignment = Assignment(
-        assignment_id=generate_next_id(Assignment),
-        class_id=class_id,
-        teacher_id=teacher.teacher_id,
-        title=title,
-        description=data.get('description', ''),
-        type=data.get('type', 'homework'),
-        total_score=data.get('total_score', 100),
-        deadline=deadline,
-        status=1 # Open
-    )
-    
-    db.session.add(new_assignment)
-    db.session.commit()
-    
-    return jsonify({'message': 'Assignment created successfully', 'id': new_assignment.assignment_id}), 201
+    try:
+        new_assignment = Assignment(
+            assignment_id=generate_next_id(Assignment, 'assignment_id'),
+            class_id=class_id,
+            teacher_id=teacher.teacher_id,
+            title=title,
+            description=data.get('description', ''),
+            type=data.get('type', 'homework'),
+            total_score=data.get('total_score', 100),
+            deadline=deadline,
+            status=1 # Open
+        )
+        
+        db.session.add(new_assignment)
+        db.session.commit()
+        
+        return jsonify({'message': 'Assignment created successfully', 'id': new_assignment.assignment_id}), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': f'Database error: {str(e)}'}), 500
 
 @assignments_bp.route('/<int:assignment_id>', methods=['GET'])
 @login_required
@@ -158,3 +167,37 @@ def grade_submission(assignment_id, student_id):
     db.session.commit()
     
     return jsonify({'message': 'Graded successfully'})
+
+
+@assignments_bp.route('/<int:assignment_id>/grades', methods=['GET'])
+@login_required
+def get_assignment_grades(assignment_id):
+    """获取某作业的所有学生成绩（教师端）"""
+    if current_user.role != 'teacher':
+        return jsonify({'error': 'Unauthorized'}), 403
+    
+    assignment = Assignment.query.get_or_404(assignment_id)
+    
+    # 获取班级所有学生
+    enrollments = StudentClass.query.filter_by(class_id=assignment.class_id, status=1).all()
+    
+    result = []
+    for enrollment in enrollments:
+        student = enrollment.student
+        submission = Submission.query.filter_by(
+            assignment_id=assignment_id,
+            student_id=student.student_id
+        ).first()
+        
+        result.append({
+            'student_id': student.student_id,
+            'student_no': student.student_no,
+            'student_name': student.user.real_name,
+            'score': float(submission.score) if submission and submission.score is not None else None,
+            'submitted_at': submission.submit_time.isoformat() if submission and submission.submit_time else None,
+            'graded_at': submission.graded_time.isoformat() if submission and submission.graded_time else None,
+            'feedback': submission.feedback if submission else None,
+            'status': submission.status if submission else 'unsubmitted'
+        })
+    
+    return jsonify(result)

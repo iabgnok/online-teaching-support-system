@@ -255,6 +255,35 @@ def upload_material(class_id):
         
         return jsonify({'message': 'File uploaded successfully', 'id': new_material.material_id}), 201
 
+
+@classes_bp.route('/materials/<int:material_id>', methods=['DELETE'])
+@login_required
+def delete_material(material_id):
+    """删除课件资料"""
+    if current_user.role != 'teacher':
+        return jsonify({'error': 'Unauthorized'}), 403
+    
+    material = Material.query.get_or_404(material_id)
+    
+    # 验证权限
+    teacher = current_user.teacher_profile
+    if not teacher or material.teacher_id != teacher.teacher_id:
+        return jsonify({'error': 'You can only delete your own materials'}), 403
+    
+    # 删除文件
+    try:
+        file_path = os.path.join(current_app.config['MATERIALS_FOLDER'], material.file_name)
+        if os.path.exists(file_path):
+            os.remove(file_path)
+    except Exception as e:
+        print(f"Failed to delete file: {e}")
+    
+    # 删除数据库记录
+    db.session.delete(material)
+    db.session.commit()
+    
+    return jsonify({'message': 'Material deleted successfully'})
+
 @classes_bp.route('/<int:class_id>/students', methods=['GET'])
 @login_required
 def get_class_students(class_id):

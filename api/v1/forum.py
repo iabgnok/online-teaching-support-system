@@ -13,28 +13,40 @@ def allowed_file(filename):
 @login_required
 def get_my_classes():
     classes = []
-    if current_user.role == 'student':
-        # enrollments via StudentClass
-        enrollments = StudentClass.query.filter_by(student_id=current_user.student_profile.student_id).all()
-        for e in enrollments:
-            classes.append({
-                'id': e.class_id,
-                'name': f"{e.teaching_class.class_name}"
-            })
-    elif current_user.role == 'teacher':
-        assignments = TeacherClass.query.filter_by(teacher_id=current_user.teacher_profile.teacher_id).all()
-        for a in assignments:
-            classes.append({
-                'id': a.class_id,
-                'name': f"{a.teaching_class.class_name}"
-            })
-    elif current_user.role == 'admin':
-         all_classes = TeachingClass.query.all()
-         for c in all_classes:
-             classes.append({
-                 'id': c.class_id,
-                 'name': f"{c.class_name} ({c.class_id})"
-             })
+    try:
+        if current_user.role == 'student':
+            student_profile = current_user.student_profile
+            if not student_profile:
+                return jsonify([])
+            # enrollments via StudentClass
+            enrollments = StudentClass.query.filter_by(student_id=student_profile.student_id, status=1).all()
+            for e in enrollments:
+                if e.teaching_class:
+                    classes.append({
+                        'id': e.class_id,
+                        'name': f"{e.teaching_class.class_name}"
+                    })
+        elif current_user.role == 'teacher':
+            teacher_profile = current_user.teacher_profile
+            if not teacher_profile:
+                return jsonify([])
+            assignments = TeacherClass.query.filter_by(teacher_id=teacher_profile.teacher_id).all()
+            for a in assignments:
+                if a.teaching_class:
+                    classes.append({
+                        'id': a.class_id,
+                        'name': f"{a.teaching_class.class_name}"
+                    })
+        elif current_user.role == 'admin':
+             all_classes = TeachingClass.query.all()
+             for c in all_classes:
+                 classes.append({
+                     'id': c.class_id,
+                     'name': f"{c.class_name} ({c.class_id})"
+                 })
+    except Exception as e:
+        print(f"Error getting my classes: {e}")
+        return jsonify([])
              
     return jsonify(classes)
 
@@ -54,6 +66,7 @@ def get_forum_posts(class_id):
             'content': p.content[:200] + '...' if len(p.content) > 200 else p.content,
             'author_name': p.author.real_name,
             'author_id': p.author_id,
+            'author_role': p.author.role,
             'created_at': p.created_at.isoformat() if p.created_at else None,
             'updated_at': p.updated_at.isoformat() if p.updated_at else None,
             'reply_count': p.comments.count(),
@@ -128,6 +141,7 @@ def get_post_detail(post_id):
             'content': c.content,
             'author_name': c.author.real_name,
             'author_id': c.author.user_id,
+            'author_role': c.author.role,
             'created_at': c.created_at.isoformat() if c.created_at else None,
             'is_accepted': c.is_accepted_answer,
             'replies': [format_comment(r) for r in c.replies]
@@ -139,6 +153,7 @@ def get_post_detail(post_id):
         'content': post.content,
         'author_name': post.author.real_name,
         'author_id': post.author_id,
+        'author_role': post.author.role,
         'created_at': post.created_at.isoformat() if post.created_at else None,
         'is_pinned': post.is_pinned,
         'is_solved': post.is_solved,

@@ -6,10 +6,24 @@
         </template>
      </el-page-header>
 
+     <el-alert
+        title="提示：已启用新成绩系统"
+        type="info"
+        :closable="false"
+        class="mb-4"
+     >
+        <template #default>
+          <div>新成绩系统支持灵活配置分类、权重、自动考勤计算和排名功能。</div>
+          <el-button type="primary" size="small" @click="goToNewGradeSystem" class="mt-2">
+            前往新成绩配置
+          </el-button>
+        </template>
+     </el-alert>
+
      <el-card shadow="never">
         <template #header>
             <div class="flex justify-between items-center">
-                <span>成绩总览</span>
+                <span>旧成绩总览（仅显示作业成绩）</span>
                 <el-button type="primary" size="small" @click="fetchGrades">刷新</el-button>
             </div>
         </template>
@@ -58,10 +72,11 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import api from '../../api'
 
 const route = useRoute()
+const router = useRouter()
 const classId = route.params.id
 const loading = ref(false)
 const tableData = ref([])
@@ -79,6 +94,10 @@ const fetchGrades = async () => {
     } finally {
         loading.value = false
     }
+}
+
+const goToNewGradeSystem = () => {
+    router.push(`/teacher/class/${classId}/grade-config`)
 }
 
 onMounted(() => {
