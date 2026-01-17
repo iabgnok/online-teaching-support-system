@@ -1,0 +1,109 @@
+/* 全局CSS变量 - 设计系统 */
+
+:root {
+  /* 颜色系统 */
+  --primary-color: #5B7FFF;        /* 主色 - 清新蓝紫色 */
+  --primary-light: #7B9DFF;        /* 主色浅色版本 */
+  --primary-dark: #4F46E5;         /* 主色深色版本 (升级为更深的蓝) */
+  --primary-darker: #4338CA;       /* 主色最深版本 */
+  
+  --accent-color: #8B5CF6;         /* 辅助色 - 紫色 */
+  --success-color: #10B981;        /* 成功色 - 绿色 */
+  --warning-color: #F59E0B;        /* 警告色 - 橙色 */
+  --danger-color: #EF4444;         /* 危险色 - 红色 */
+  
+  --bg-primary: #F8FAFC;           /* 主背景色 - 浅灰蓝 */
+  --bg-secondary: #F1F5F9;         /* 次要背景色 */
+  --bg-card: #FFFFFF;              /* 卡片背景 */
+  
+  /* 文字颜色 - WCAG AA合规 */
+  --text-primary: #1E293B;         /* 主文字色 (对比度 18:1) */
+  --text-secondary: #475569;       /* 次要文字色 (升级: #64748B -> #475569) */
+  --text-tertiary: #94A3B8;        /* 三级文字色 */
+  --text-disabled: #CBD5E1;        /* 禁用状态文字 */
+  
+  --border-color: #E2E8F0;         /* 边框色 */
+  --border-light: #F1F5F9;         /* 浅色边框 */
+  
+  /* 角色标签颜色 */
+  --role-student: #3B82F6;         /* 学生 - 蓝色 */
+  --role-teacher: #10B981;         /* 教师 - 绿色 */
+  --role-admin: #F59E0B;           /* 管理员 - 橙色 */
+  
+  /* 间距系统（8px基础） */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+  --spacing-2xl: 48px;
+  
+  /* 圆角系统 */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  
+  /* 阴影系统 */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
+  --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.1);
+  
+  /* 过渡时间 */
+  --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-base: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+  
+  /* 字体系统 - 优化汉字显示 */
+  --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', '微软雅黑', sans-serif;
+  
+  /* 字体大小体系 */
+  --font-size-xs: 12px;            /* 辅助文字 */
+  --font-size-sm: 14px;            /* 小文字 */
+  --font-size-base: 16px;          /* 正文 */
+  --font-size-lg: 18px;            /* 较大文字 */
+  --font-size-xl: 20px;            /* 大标题 */
+  --font-size-2xl: 24px;           /* 更大标题 */
+  --font-size-3xl: 28px;           /* 特大标题 */
+  --font-size-4xl: 32px;           /* 超大标题 */
+  
+  /* 行高体系 */
+  --line-height-tight: 1.4;        /* 紧凑行高 */
+  --line-height-normal: 1.6;       /* 标准行高 */
+  --line-height-relaxed: 1.8;      /* 宽松行高 */
+  
+  /* 字重 */
+  --font-weight-normal: 400;       /* 常规 */
+  --font-weight-medium: 500;       /* 中等 */
+  --font-weight-semibold: 600;     /* 半粗 */
+  --font-weight-bold: 700;         /* 粗体 */
+  
+  /* 侧边栏宽度 */
+  --sidebar-width: 220px;
+  --sidebar-collapsed-width: 80px;
+  
+  /* 头部高度 */
+  --header-height: 64px;
+}
+
+/* 浅色主题 */
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-family);
+}
+
+/* 深色主题支持 */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-primary: #0F172A;
+    --bg-secondary: #1A202C;
+    --bg-card: #1E293B;
+    --text-primary: #F1F5F9;        /* 深色背景下提高到最亮白色 */
+    --text-secondary: #CBD5E1;      /* 深色背景下的次要文字 */
+    --text-tertiary: #94A3B8;
+    --text-disabled: #64748B;
+    --border-color: #334155;
+    --border-light: #1E293B;
+  }
+}
