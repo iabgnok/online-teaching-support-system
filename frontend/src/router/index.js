@@ -16,6 +16,7 @@ import ClassGrades from '../views/teacher/ClassGrades.vue'
 import GradeConfig from '../views/teacher/GradeConfig.vue'
 import GradeInput from '../views/teacher/GradeInput.vue'
 import GradeStatistics from '../views/teacher/GradeStatistics.vue'
+import TeachingPlan from '../views/teacher/TeachingPlan.vue'
 
 // Student Grade View
 import MyGrades from '../views/student/MyGrades.vue'
@@ -50,6 +51,7 @@ const routes = [
       path: '/teacher', 
       children: [
           { path: 'dashboard', component: TeacherDashboard },
+          { path: 'teaching-plan', component: TeachingPlan },
           { path: 'class/:id', component: TeacherClassDetail },
           { path: 'class/:id/grades', component: ClassGrades },
           { path: 'class/:id/grade-config', component: GradeConfig },

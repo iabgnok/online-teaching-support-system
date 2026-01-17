@@ -448,3 +448,38 @@ def get_class_grades(class_id):
         'assignments': ass_headers,
         'students': rows
     })
+
+
+@classes_bp.route('/my-classes', methods=['GET'])
+@login_required
+def get_teacher_my_classes():
+    """获取当前教师的班级列表"""
+    if current_user.role != 'teacher':
+        return jsonify({'error': 'Only teachers can access this endpoint'}), 403
+    
+    teacher = current_user.teacher_profile
+    if not teacher:
+        return jsonify({'error': 'Teacher profile not found'}), 404
+    
+    # 获取教师教授的班级
+    teachings = TeacherClass.query.filter_by(teacher_id=teacher.teacher_id).all()
+    
+    result = []
+    for teaching in teachings:
+        try:
+            teaching_class = teaching.teaching_class
+            if teaching_class:
+                result.append({
+                    'class_id': teaching_class.class_id,
+                    'class_name': teaching_class.class_name,
+                    'course_id': teaching_class.course_id,
+                    'course_name': teaching_class.course.course_name if teaching_class.course else '',
+                    'semester': teaching_class.semester
+                })
+        except Exception as e:
+            current_app.logger.error(f"Error processing teaching class: {str(e)}", exc_info=True)
+            continue
+    
+    return jsonify(result)
+
+

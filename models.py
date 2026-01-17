@@ -493,6 +493,58 @@ class StudentFinalGrade(db.Model):
     )
 
 
+# ==================== 教学计划与任务日历模块 ====================
+
+class TeachingPlan(db.Model):
+    """教学计划表 - 教师创建的教学进度计划"""
+    __tablename__ = 'TeachingPlan'
+    
+    plan_id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
+    teacher_id = db.Column(db.BigInteger, db.ForeignKey('Teacher.teacher_id', name='FK_TeachingPlan_Teacher'), nullable=False)
+    class_id = db.Column(db.BigInteger, db.ForeignKey('TeachingClass.class_id', name='FK_TeachingPlan_Class'), nullable=False)
+    
+    title = db.Column(db.String(200), nullable=False)  # 计划标题，如"第1章 绪论"
+    description = db.Column(db.Text)  # 详细描述
+    
+    planned_date = db.Column(db.DateTime(timezone=True), nullable=False, index=True)  # 计划日期
+    duration_minutes = db.Column(db.Integer, default=60)  # 预计时长（分钟）
+    
+    # 同步到学生端的开关
+    sync_to_students = db.Column(db.Boolean, default=False)  # 是否同步到学生端
+    
+    created_at = db.Column(db.DateTime(timezone=True), default=func.now())
+    updated_at = db.Column(db.DateTime(timezone=True), default=func.now(), onupdate=func.now())
+    
+    # 关系
+    teaching_class = db.relationship('TeachingClass', backref='teaching_plans')
+    teacher = db.relationship('Teacher', backref='teaching_plans')
+
+
+class PersonalTask(db.Model):
+    """个人任务表 - 学生自己添加的学习计划"""
+    __tablename__ = 'PersonalTask'
+    
+    task_id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
+    student_id = db.Column(db.BigInteger, db.ForeignKey('Student.student_id', name='FK_PersonalTask_Student'), nullable=False)
+    
+    title = db.Column(db.String(200), nullable=False)  # 任务标题
+    description = db.Column(db.Text)  # 任务描述
+    
+    planned_date = db.Column(db.DateTime(timezone=True), nullable=False, index=True)  # 计划完成日期
+    duration_minutes = db.Column(db.Integer, default=60)  # 预计时长（分钟）
+    
+    is_completed = db.Column(db.Boolean, default=False)  # 是否完成
+    completed_at = db.Column(db.DateTime(timezone=True))  # 完成时间
+    
+    priority = db.Column(db.String(20), default='normal')  # 优先级: low, normal, high
+    
+    created_at = db.Column(db.DateTime(timezone=True), default=func.now())
+    updated_at = db.Column(db.DateTime(timezone=True), default=func.now(), onupdate=func.now())
+    
+    # 关系
+    student = db.relationship('Student', backref='personal_tasks')
+
+
 # ==================== Phase 1: 增强功能模块 ====================
 
 class Announcement(db.Model):

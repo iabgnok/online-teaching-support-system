@@ -57,6 +57,7 @@ const navigationLinks = computed(() => {
   } else if (userRole.value === 'teacher') {
     return [
       { path: '/teacher/dashboard', label: '工作台' },
+      { path: '/teacher/teaching-plan', label: '教学计划' },
       { path: '/forum', label: '论坛' },
       { path: '/messages', label: '站内信' },
       { path: '/profile', label: '账户信息' }
