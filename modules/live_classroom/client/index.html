@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>线上授课模块 - 隔离测试环境</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background: #f0f2f5; }
+        #canvas-container { position: relative; border: 2px solid #333; background: white; margin-top: 20px; }
+        canvas { cursor: crosshair; }
+        .controls { margin-top: 10px; display: flex; gap: 10px; padding: 10px; background: white; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        #chat-window { width: 800px; height: 150px; border: 1px solid #ccc; margin-top: 20px; overflow-y: auto; background: white; padding: 10px; }
+        .log { font-size: 0.8em; color: #666; }
+    </style>
+</head>
+<body>
+    <h1>线上授课 - 协同画板测试 (隔离区)</h1>
+    
+    <div class="controls">
+        <label>身份:</label>
+        <select id="role">
+            <option value="teacher">教师</option>
+            <option value="student">学生</option>
+        </select>
+        <input type="text" id="username" placeholder="输入用户名" value="测试用户">
+        <input type="text" id="classId" placeholder="班级代码" value="CLASS_101">
+        <button onclick="connect()">连接并加入课堂</button>
+        <button onclick="clearCanvas()">清空画板</button>
+        <span id="status-text" style="color: red;">未连接</span>
+    </div>
+
+    <div id="canvas-container">
+        <canvas id="live-canvas" width="800" height="450"></canvas>
+    </div>
+
+    <div id="chat-window">
+        <div class="log">系统: 请输入用户名和班级后点击连接...</div>
+    </div>
+
+    <script>
+        let socket;
+        const canvas = document.getElementById('live-canvas');
+        const ctx = canvas.getContext('2d');
+        let isDrawing = false;
+        const classIdInput = document.getElementById('classId');
+        const usernameInput = document.getElementById('username');
+        const roleSelect = document.getElementById('role');
+
+        function log(msg) {
+            const div = document.createElement('div');
+            div.textContent = msg;
+            const chat = document.getElementById('chat-window');
+            chat.appendChild(div);
+            chat.scrollTop = chat.scrollHeight;
+        }
+
+        function connect() {
+            const classId = classIdInput.value;
+            const user = usernameInput.value;
+
+            // 连接到隔离的测试服务器 (Port 5001)
+            socket = io('http://localhost:5001');
+
+            socket.on('connect', () => {
+                document.getElementById('status-text').textContent = '已连接';
+                document.getElementById('status-text').style.color = 'green';
+                log(`已连接到服务器，正在进入班级: ${classId}...`);
+                socket.emit('join_lesson', { class_id: classId, user_name: user });
+            });
+
+            socket.on('status', (data) => log(`系统信息: ${data.msg}`));
+
+            // 监听绘画数据
+            socket.on('drawing', (data) => {
+                draw(data.x * canvas.width, data.y * canvas.height, data.color, false);
+            });
+
+            socket.on('disconnect', () => {
+                document.getElementById('status-text').textContent = '连接已断开';
+                document.getElementById('status-text').style.color = 'red';
+            });
+        }
+
+        function draw(x, y, color, isLocal = true) {
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(x, y, 3, 0, Math.PI * 2);
+            ctx.fill();
+
+            if (isLocal && socket && roleSelect.value === 'teacher') {
+                // 只有老师端发送绘画坐标 (百分比)
+                socket.emit('drawing', {
+                    x: x / canvas.width,
+                    y: y / canvas.height,
+                    color: color,
+                    class_id: classIdInput.value
+                });
+            }
+        }
+
+        canvas.addEventListener('mousedown', (e) => {
+            if (roleSelect.value !== 'teacher') return; // 学生端禁止本地绘画（仅同步）
+            isDrawing = true;
+            const rect = canvas.getBoundingClientRect();
+            draw(e.clientX - rect.left, e.clientY - rect.top, '#ff0000');
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (isDrawing) {
+                const rect = canvas.getBoundingClientRect();
+                draw(e.clientX - rect.left, e.clientY - rect.top, '#ff0000');
+            }
+        });
+
+        window.addEventListener('mouseup', () => isDrawing = false);
+
+        function clearCanvas() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+    </script>
+</body>
+</html>
