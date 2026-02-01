@@ -1,5 +1,5 @@
-from flask import Blueprint, jsonify, request
-from flask_login import current_user, login_required
+from flask import Blueprint, jsonify, request, g
+from .auth import api_login_required
 from models import db, Assignment, TeachingClass, StudentClass, TeacherClass, Submission, TeachingPlan, PersonalTask
 from datetime import timedelta, datetime, timezone
 
@@ -40,7 +40,7 @@ def get_event_color(planned_date):
         return '#909399'  # 默认灰色
 
 @api_v1.route('/schedule/events', methods=['GET'])
-@login_required
+@api_login_required
 def get_events():
     """获取日历事件（作业、考试、教学计划、个人任务）"""
     # FullCalendar 传递 start 和 end 参数 (ISO8601 字符串)
@@ -52,18 +52,18 @@ def get_events():
     # 1. 获取用户关联的班级ID列表
     student_id = None
     class_ids = []
-    if current_user.role == 'student':
-        student = current_user.student_profile
+    if g.user.role == 'student':
+        student = g.user.student_profile
         if student:
             student_id = student.student_id
             enrollments = StudentClass.query.filter_by(student_id=student.student_id, status=1).all()
             class_ids = [e.class_id for e in enrollments]
-    elif current_user.role == 'teacher':
-        teacher = current_user.teacher_profile
+    elif g.user.role == 'teacher':
+        teacher = g.user.teacher_profile
         if teacher:
             teachings = TeacherClass.query.filter_by(teacher_id=teacher.teacher_id).all()
             class_ids = [t.class_id for t in teachings]
-    elif current_user.role == 'admin':
+    elif g.user.role == 'admin':
         # 管理员暂无日历视图需求，或者可以查看全校大事件
         return jsonify([])
 
@@ -132,7 +132,7 @@ def get_events():
             })
 
     # 3. 如果是学生端，添加已同步的教学计划
-    if current_user.role == 'student':
+    if g.user.role == 'student':
         # 获取已同步到学生端的教学计划
         teaching_plans = TeachingPlan.query.filter(
             TeachingPlan.class_id.in_(class_ids),

@@ -118,7 +118,7 @@
         <el-card class="box-card" header="📢 系统公告">
              <div v-if="announcements.length === 0" class="text-center text-secondary p-4">暂无公告</div>
              <ul v-else class="list-none p-0 m-0">
-               <li v-for="anno in announcements" :key="anno.id" class="border-b py-3 last:border-0">
+               <li v-for="anno in announcements" :key="anno.id" class="border-b py-3 last:border-0 cursor-pointer hover:bg-gray-50 transition-colors" @click="showAnnouncementDetail(anno.id)">
                   <div class="mb-1">
                       <span class="font-medium">{{ anno.title }}</span>
                   </div>
@@ -131,6 +131,26 @@
         </el-card>
       </el-col>
     </el-row>
+
+    <!-- 公告详情对话框 -->
+    <el-dialog v-model="announcementDialogVisible" title="公告详情" width="600px" :close-on-click-modal="false">
+      <div v-if="currentAnnouncement" class="announcement-detail">
+        <h3 class="announcement-title">{{ currentAnnouncement.title }}</h3>
+        <div class="announcement-meta text-secondary text-sm mb-4">
+          <span>发布时间: {{ formatDateShort(currentAnnouncement.created_at) }}</span>
+          <span class="ml-4">发布者: {{ currentAnnouncement.author_name }}</span>
+          <span v-if="currentAnnouncement.target_class_name" class="ml-4">班级: {{ currentAnnouncement.target_class_name }}</span>
+        </div>
+        <div class="announcement-content" v-html="formatContent(currentAnnouncement.content)"></div>
+      </div>
+      <div v-else class="text-center p-4">
+        <el-icon class="is-loading"><Loading /></el-icon>
+        <p>加载中...</p>
+      </div>
+      <template #footer>
+        <el-button @click="announcementDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -138,7 +158,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Location, User } from '@element-plus/icons-vue'
+import { Location, User, Loading } from '@element-plus/icons-vue'
 import api from '../../api'
 
 const router = useRouter()
@@ -157,6 +177,10 @@ const stats = ref({
 
 const loadingClasses = ref(true)
 const loadingEvents = ref(true)
+
+// 公告详情相关
+const announcementDialogVisible = ref(false)
+const currentAnnouncement = ref(null)
 
 const fetchClasses = async () => {
     console.log('Fetching classes...')
@@ -292,6 +316,27 @@ const getEventStatus = (event) => {
   return { type: 'warning', text: '待提交' }
 }
 
+// 公告详情相关方法
+const showAnnouncementDetail = async (announcementId) => {
+  try {
+    announcementDialogVisible.value = true
+    currentAnnouncement.value = null
+    
+    const response = await api.get(`/announcements/${announcementId}`)
+    currentAnnouncement.value = response.data
+  } catch (error) {
+    console.error('Failed to load announcement detail:', error)
+    ElMessage.error('加载公告详情失败')
+    announcementDialogVisible.value = false
+  }
+}
+
+const formatContent = (content) => {
+  if (!content) return ''
+  // 将换行符转换为<br>，简单处理HTML
+  return content.replace(/\n/g, '<br>')
+}
+
 onMounted(async () => {
   console.log('Dashboard mounted')
   currentDate.value = new Date().toLocaleDateString('zh-CN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
@@ -355,4 +400,31 @@ onMounted(async () => {
 .py-3 { padding-top: 12px; padding-bottom: 12px; }
 .pt-2 { padding-top: 8px; }
 .mt-2 { margin-top: 8px; }
+.ml-4 { margin-left: 16px; }
+.transition-colors { transition: background-color 0.2s; }
+.hover\:bg-gray-50:hover { background-color: #f9fafb; }
+
+/* 公告详情样式 */
+.announcement-detail {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.announcement-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: #303133;
+}
+
+.announcement-meta {
+  border-bottom: 1px solid #ebeef5;
+  padding-bottom: 12px;
+}
+
+.announcement-content {
+  line-height: 1.6;
+  color: #606266;
+  white-space: pre-wrap;
+}
 </style>

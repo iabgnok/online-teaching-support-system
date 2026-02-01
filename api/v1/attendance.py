@@ -1,20 +1,9 @@
-from flask import Blueprint, jsonify, request
-from flask_login import current_user
-from functools import wraps
+from flask import Blueprint, jsonify, request, g
 from models import Attendance, AttendanceRecord, StudentClass, TeacherClass, db, generate_next_id, Student, Users
 from datetime import datetime, date
+from .auth import api_login_required
 
 attendance_bp = Blueprint('attendance', __name__)
-
-
-def api_login_required(f):
-    """检查用户是否登录，如果未登录则返回 401"""
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if not current_user.is_authenticated:
-            return jsonify({'error': 'Authentication required'}), 401
-        return f(*args, **kwargs)
-    return decorated_function
 
 @attendance_bp.route('/class/<int:class_id>', methods=['GET'])
 @api_login_required
@@ -52,11 +41,11 @@ def get_class_attendance_list(class_id):
 @api_login_required
 def create_attendance(class_id):
     """Create a new attendance session and init records for all students"""
-    if current_user.role != 'teacher':
+    if g.user.role != 'teacher':
         return jsonify({'error': 'Unauthorized'}), 403
     
     # 验证教师权限
-    teacher = current_user.teacher_profile
+    teacher = g.user.teacher_profile
     if not teacher:
         return jsonify({'error': 'Teacher profile not found'}), 404
     
@@ -157,7 +146,7 @@ def get_attendance_detail(attendance_id):
 @api_login_required
 def update_attendance_records(attendance_id):
     """Batch update records"""
-    if current_user.role != 'teacher':
+    if g.user.role != 'teacher':
         return jsonify({'error': 'Unauthorized'}), 403
         
     data = request.get_json() 
@@ -177,10 +166,10 @@ def update_attendance_records(attendance_id):
 @api_login_required
 def get_student_my_attendance(class_id):
     """Get current student's attendance records for a class"""
-    if current_user.role != 'student':
+    if g.user.role != 'student':
         return jsonify({'error': 'Unauthorized'}), 403
         
-    student = Student.query.filter_by(user_id=current_user.user_id).first()
+    student = Student.query.filter_by(user_id=g.user.user_id).first()
     if not student:
         return jsonify({'error': 'Student profile not found'}), 404
         
@@ -231,10 +220,10 @@ def get_student_my_attendance(class_id):
 @api_login_required
 def student_checkin(attendance_id):
     """Student self check-in"""
-    if current_user.role != 'student':
+    if g.user.role != 'student':
         return jsonify({'error': 'Unauthorized'}), 403
     
-    student = current_user.student_profile
+    student = g.user.student_profile
     if not student:
         return jsonify({'error': 'Student profile not found'}), 404
         
@@ -265,13 +254,13 @@ def student_checkin(attendance_id):
 @api_login_required
 def delete_attendance(attendance_id):
     """Delete an attendance session and all its records"""
-    if current_user.role != 'teacher':
+    if g.user.role != 'teacher':
         return jsonify({'error': 'Unauthorized'}), 403
     
     att = Attendance.query.get_or_404(attendance_id)
     
     # 验证教师权限
-    teacher = current_user.teacher_profile
+    teacher = g.user.teacher_profile
     if not teacher:
         return jsonify({'error': 'Teacher profile not found'}), 404
     

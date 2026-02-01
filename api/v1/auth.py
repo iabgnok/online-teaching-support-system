@@ -1,18 +1,44 @@
-from flask import jsonify, request
+from flask import jsonify, request, g
 from flask_login import login_user, logout_user, current_user
 from models import Users, Student, Teacher
 from . import api_v1
 from functools import wraps
+from itsdangerous import URLSafeTimedSerializer as Serializer
+from flask import current_app
 
-# 自定义认证装饰器，用于 API 端点
 def api_login_required(f):
     """检查用户是否登录，如果未登录则返回 401"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if not current_user.is_authenticated:
-            return jsonify({'error': 'Authentication required'}), 401
-        return f(*args, **kwargs)
+        # 首先尝试从Authorization头获取token
+        token = request.headers.get('Authorization')
+        print(f"Debug auth: Authorization header = {token}")
+        if token and token.startswith('Bearer '):
+            token = token[7:]  # Remove 'Bearer ' prefix
+            try:
+                s = Serializer(current_app.config['SECRET_KEY'])
+                data = s.loads(token, max_age=None)  # 不检查过期时间
+                user_id = data.get('user_id')
+                print(f"Debug auth: token user_id = {user_id}")
+                user = Users.query.get(user_id)
+                if user and user.status == 1:
+                    # 将用户存储在g对象中
+                    g.user = user
+                    print(f"Debug auth: authenticated user = {user.user_id}, role = {user.role}")
+                    return f(*args, **kwargs)
+            except Exception as e:
+                print(f"Token validation error: {e}")
+                pass
+        
+        # 如果token无效或不存在，返回401
+        print("Debug auth: authentication failed")
+        return jsonify({'error': 'Authentication required'}), 401
     return decorated_function
+
+def generate_token(user):
+    """生成用户token"""
+    s = Serializer(current_app.config['SECRET_KEY'])
+    return s.dumps({'user_id': user.user_id})
 
 @api_v1.route('/login', methods=['POST'])
 def api_login():
@@ -29,8 +55,10 @@ def api_login():
         return jsonify({'error': 'Account disabled'}), 403
 
     login_user(user)
+    token = generate_token(user)
     return jsonify({
         'message': 'Logged in successfully',
+        'token': token,
         'user': {
             'id': user.user_id,
             'username': user.username,
@@ -48,24 +76,25 @@ def api_logout():
 @api_v1.route('/me', methods=['GET'])
 @api_login_required
 def get_current_user():
+    user = g.user
     data = {
-        'id': current_user.user_id,
-        'username': current_user.username,
-        'real_name': current_user.real_name,
-        'role': current_user.role,
-        'email': current_user.email,
-        'phone': current_user.phone
+        'id': user.user_id,
+        'username': user.username,
+        'real_name': user.real_name,
+        'role': user.role,
+        'email': user.email,
+        'phone': user.phone
     }
     
-    if current_user.role == 'student' and current_user.student_profile:
-        s = current_user.student_profile
+    if user.role == 'student' and user.student_profile:
+        s = user.student_profile
         data.update({
             'student_no': s.student_no,
             'major': s.major,
             'dept_name': s.department.dept_name if s.department else ''
         })
-    elif current_user.role == 'teacher' and current_user.teacher_profile:
-        t = current_user.teacher_profile
+    elif user.role == 'teacher' and user.teacher_profile:
+        t = user.teacher_profile
         data.update({
             'teacher_no': t.teacher_no,
             'title': t.title,
@@ -115,14 +144,14 @@ def update_profile():
     data = request.get_json()
     
     if 'real_name' in data:
-        current_user.real_name = data['real_name']
+        g.user.real_name = data['real_name']
     if 'phone' in data:
-        current_user.phone = data['phone']
+        g.user.phone = data['phone']
     if 'email' in data:
-        current_user.email = data['email']
+        g.user.email = data['email']
     
     try:
-        from app import db
+        from models import db
         db.session.commit()
         return jsonify({'message': '信息更新成功'})
     except Exception as e:
@@ -141,14 +170,14 @@ def change_password():
         return jsonify({'error': '密码不能为空'}), 400
     
     # 验证旧密码
-    if not current_user.verify_password(old_password):
+    if not g.user.verify_password(old_password):
         return jsonify({'error': '原密码错误'}), 400
     
     # 设置新密码
-    current_user.set_password(new_password)
+    g.user.set_password(new_password)
     
     try:
-        from app import db
+        from models import db
         db.session.commit()
         return jsonify({'message': '密码修改成功'})
     except Exception as e:

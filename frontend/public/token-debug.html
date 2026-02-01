@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Token 调试工具</title>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 20px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+        .section {
+            background: #252526;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            border-left: 4px solid #007acc;
+        }
+        h2 {
+            color: #4ec9b0;
+            margin-top: 0;
+        }
+        button {
+            background: #007acc;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        button:hover {
+            background: #005a9e;
+        }
+        .success { color: #4ec9b0; }
+        .error { color: #f48771; }
+        .warning { color: #dcdcaa; }
+        pre {
+            background: #1e1e1e;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            border: 1px solid #3c3c3c;
+        }
+        .token-display {
+            word-break: break-all;
+            background: #1e1e1e;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        input {
+            width: 100%;
+            padding: 8px;
+            background: #3c3c3c;
+            border: 1px solid #555;
+            color: #d4d4d4;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            margin: 5px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔍 Token 调试诊断工具</h1>
+
+    <div class="section">
+        <h2>📋 当前存储信息</h2>
+        <div id="storageInfo"></div>
+        <button onclick="refreshStorage()">刷新存储信息</button>
+        <button onclick="clearStorage()">清空所有存储</button>
+    </div>
+
+    <div class="section">
+        <h2>🔐 Token 解析（JWT）</h2>
+        <div id="tokenParse"></div>
+        <button onclick="parseToken()">解析当前 Token</button>
+        <button onclick="copyTokenToClipboard()">复制 Token</button>
+        <p class="warning">💡 提示：将 Token 复制到 <a href="https://jwt.io" target="_blank" style="color: #4ec9b0;">jwt.io</a> 进行在线验证</p>
+    </div>
+
+    <div class="section">
+        <h2>🧪 API 测试</h2>
+        <p>测试1：不带Cookie的请求（纯Token验证）</p>
+        <button onclick="testWithoutCookie()">测试不带Cookie</button>
+        
+        <p>测试2：带Cookie的请求（默认方式）</p>
+        <button onclick="testWithCookie()">测试带Cookie</button>
+        
+        <p>测试3：手动登录获取新Token</p>
+        <input type="text" id="username" placeholder="用户名">
+        <input type="password" id="password" placeholder="密码">
+        <button onclick="testLogin()">登录获取新Token</button>
+        
+        <div id="testResult"></div>
+    </div>
+
+    <div class="section">
+        <h2>📊 Cookie 信息</h2>
+        <div id="cookieInfo"></div>
+        <button onclick="refreshCookies()">查看Cookies</button>
+        <button onclick="clearCookies()">清空Cookies</button>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:5000/api/v1';
+
+        function refreshStorage() {
+            const token = localStorage.getItem('user_token');
+            const role = localStorage.getItem('user_role');
+            const userId = localStorage.getItem('user_id');
+            const userName = localStorage.getItem('user_name');
+
+            let html = '<pre>';
+            html += `Token: ${token ? token.substring(0, 50) + '...' : '<span class="error">未找到</span>'}\n`;
+            html += `完整Token长度: ${token ? token.length : 0} 字符\n`;
+            html += `用户ID: ${userId || '<span class="error">未找到</span>'}\n`;
+            html += `用户名: ${userName || '<span class="error">未找到</span>'}\n`;
+            html += `角色: ${role || '<span class="error">未找到</span>'}`;
+            html += '</pre>';
+
+            document.getElementById('storageInfo').innerHTML = html;
+        }
+
+        function parseToken() {
+            const token = localStorage.getItem('user_token');
+            if (!token) {
+                document.getElementById('tokenParse').innerHTML = '<p class="error">未找到Token</p>';
+                return;
+            }
+
+            try {
+                // JWT 格式: header.payload.signature
+                const parts = token.split('.');
+                if (parts.length !== 3) {
+                    throw new Error('Token格式错误，应该有3个部分');
+                }
+
+                // 解码 payload
+                const payload = JSON.parse(atob(parts[1]));
+                
+                let html = '<div class="token-display">' + token + '</div>';
+                html += '<pre>';
+                html += '<span class="success">✓ Token格式正确（3个部分）</span>\n\n';
+                html += '<strong>Payload内容：</strong>\n';
+                html += JSON.stringify(payload, null, 2);
+                
+                if (payload.exp) {
+                    const expDate = new Date(payload.exp * 1000);
+                    const now = new Date();
+                    const isExpired = expDate < now;
+                    html += '\n\n<strong>过期时间：</strong>\n';
+                    html += `${expDate.toLocaleString()} ${isExpired ? '<span class="error">(已过期!)</span>' : '<span class="success">(有效)</span>'}`;
+                } else {
+                    html += '\n\n<span class="warning">⚠ Token没有过期时间（永久有效或后端不检查）</span>';
+                }
+                
+                html += '</pre>';
+                document.getElementById('tokenParse').innerHTML = html;
+            } catch (e) {
+                document.getElementById('tokenParse').innerHTML = `<p class="error">解析失败: ${e.message}</p>`;
+            }
+        }
+
+        function copyTokenToClipboard() {
+            const token = localStorage.getItem('user_token');
+            if (!token) {
+                alert('没有Token可复制');
+                return;
+            }
+            navigator.clipboard.writeText(token).then(() => {
+                alert('Token已复制到剪贴板！\n\n请访问 https://jwt.io 粘贴验证');
+            });
+        }
+
+        function clearStorage() {
+            if (confirm('确定要清空所有存储吗？')) {
+                localStorage.clear();
+                refreshStorage();
+                alert('存储已清空');
+            }
+        }
+
+        async function testWithoutCookie() {
+            const token = localStorage.getItem('user_token');
+            if (!token) {
+                document.getElementById('testResult').innerHTML = '<p class="error">没有Token，请先登录</p>';
+                return;
+            }
+
+            document.getElementById('testResult').innerHTML = '<p class="warning">⏳ 测试中...</p>';
+
+            try {
+                const response = await fetch(`${API_BASE}/chat/conversations`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    credentials: 'omit' // 不发送Cookie
+                });
+
+                let result = `<pre>`;
+                result += `<strong>测试结果：不带Cookie</strong>\n`;
+                result += `状态码: ${response.status} ${response.statusText}\n\n`;
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    result += `<span class="success">✓ 请求成功！</span>\n`;
+                    result += `返回数据: ${JSON.stringify(data, null, 2)}`;
+                } else {
+                    const text = await response.text();
+                    result += `<span class="error">✗ 请求失败</span>\n`;
+                    result += `响应内容: ${text}`;
+                }
+                result += `</pre>`;
+                document.getElementById('testResult').innerHTML = result;
+            } catch (error) {
+                document.getElementById('testResult').innerHTML = `<p class="error">请求异常: ${error.message}</p>`;
+            }
+        }
+
+        async function testWithCookie() {
+            const token = localStorage.getItem('user_token');
+            if (!token) {
+                document.getElementById('testResult').innerHTML = '<p class="error">没有Token，请先登录</p>';
+                return;
+            }
+
+            document.getElementById('testResult').innerHTML = '<p class="warning">⏳ 测试中...</p>';
+
+            try {
+                const response = await fetch(`${API_BASE}/chat/conversations`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    credentials: 'include' // 发送Cookie
+                });
+
+                let result = `<pre>`;
+                result += `<strong>测试结果：带Cookie</strong>\n`;
+                result += `状态码: ${response.status} ${response.statusText}\n\n`;
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    result += `<span class="success">✓ 请求成功！</span>\n`;
+                    result += `返回数据: ${JSON.stringify(data, null, 2)}`;
+                } else {
+                    const text = await response.text();
+                    result += `<span class="error">✗ 请求失败</span>\n`;
+                    result += `响应内容: ${text}`;
+                }
+                result += `</pre>`;
+                document.getElementById('testResult').innerHTML = result;
+            } catch (error) {
+                document.getElementById('testResult').innerHTML = `<p class="error">请求异常: ${error.message}</p>`;
+            }
+        }
+
+        async function testLogin() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            if (!username || !password) {
+                alert('请输入用户名和密码');
+                return;
+            }
+
+            document.getElementById('testResult').innerHTML = '<p class="warning">⏳ 登录中...</p>';
+
+            try {
+                const response = await fetch(`${API_BASE}/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ username, password })
+                });
+
+                let result = `<pre>`;
+                result += `<strong>登录测试结果</strong>\n`;
+                result += `状态码: ${response.status} ${response.statusText}\n\n`;
+
+                if (response.ok) {
+                    const data = await response.json();
+                    result += `<span class="success">✓ 登录成功！</span>\n`;
+                    result += `用户信息: ${JSON.stringify(data.user, null, 2)}\n\n`;
+                    result += `<strong>新Token:</strong>\n${data.token}\n\n`;
+                    result += `Token长度: ${data.token.length} 字符`;
+                    
+                    // 保存新token
+                    if (confirm('是否保存新Token到localStorage？')) {
+                        localStorage.setItem('user_token', data.token);
+                        localStorage.setItem('user_role', data.user.role);
+                        localStorage.setItem('user_id', data.user.id);
+                        localStorage.setItem('user_name', data.user.real_name);
+                        refreshStorage();
+                        parseToken();
+                        result += `\n\n<span class="success">✓ 已保存新Token</span>`;
+                    }
+                } else {
+                    const text = await response.text();
+                    result += `<span class="error">✗ 登录失败</span>\n`;
+                    result += `响应: ${text}`;
+                }
+                result += `</pre>`;
+                document.getElementById('testResult').innerHTML = result;
+            } catch (error) {
+                document.getElementById('testResult').innerHTML = `<p class="error">登录异常: ${error.message}</p>`;
+            }
+        }
+
+        function refreshCookies() {
+            const cookies = document.cookie;
+            let html = '<pre>';
+            if (cookies) {
+                const cookieList = cookies.split(';');
+                html += `<strong>发现 ${cookieList.length} 个Cookie:</strong>\n\n`;
+                cookieList.forEach(cookie => {
+                    html += cookie.trim() + '\n';
+                });
+            } else {
+                html += '<span class="warning">没有Cookie</span>';
+            }
+            html += '</pre>';
+            document.getElementById('cookieInfo').innerHTML = html;
+        }
+
+        function clearCookies() {
+            if (confirm('确定要清空所有Cookies吗？')) {
+                document.cookie.split(";").forEach(c => {
+                    document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
+                });
+                refreshCookies();
+                alert('Cookies已清空');
+            }
+        }
+
+        // 页面加载时自动刷新
+        window.onload = () => {
+            refreshStorage();
+            refreshCookies();
+        };
+    </script>
+</body>
+</html>

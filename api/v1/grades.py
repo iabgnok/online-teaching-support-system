@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
-from flask import Blueprint, jsonify, request
-from flask_login import current_user
+from flask import Blueprint, jsonify, request, g
 from functools import wraps
 from models import (
     db, GradeCategory, GradeItem, StudentGradeScore, StudentFinalGrade,
@@ -10,18 +9,11 @@ from models import (
 )
 from datetime import datetime
 from sqlalchemy import func
+from flask_login import current_user
+
+from .auth import api_login_required
 
 grades_bp = Blueprint('grades', __name__, url_prefix='/api/v1/grades')
-
-
-def api_login_required(f):
-    """API????????401 JSON?????"""
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if not current_user.is_authenticated:
-            return jsonify({'error': 'Authentication required'}), 401
-        return f(*args, **kwargs)
-    return decorated_function
 
 
 # ==================== ?????? ====================
@@ -59,7 +51,7 @@ def get_grade_categories(class_id):
 @api_login_required
 def create_grade_category(class_id):
     """??????"""
-    if current_user.role != 'teacher':
+    if g.user.role != 'teacher':
         return jsonify({'error': 'Unauthorized'}), 403
     
     data = request.json
@@ -83,7 +75,7 @@ def create_grade_category(class_id):
 @api_login_required
 def update_grade_category(category_id):
     """??????"""
-    if current_user.role != 'teacher':
+    if g.user.role != 'teacher':
         return jsonify({'error': 'Unauthorized'}), 403
     
     category = GradeCategory.query.get_or_404(category_id)
@@ -106,7 +98,7 @@ def update_grade_category(category_id):
 @api_login_required
 def delete_grade_category(category_id):
     """??????"""
-    if current_user.role != 'teacher':
+    if g.user.role != 'teacher':
         return jsonify({'error': 'Unauthorized'}), 403
     
     category = GradeCategory.query.get_or_404(category_id)
@@ -122,7 +114,7 @@ def delete_grade_category(category_id):
 @api_login_required
 def create_grade_item(category_id):
     """??????"""
-    if current_user.role != 'teacher':
+    if g.user.role != 'teacher':
         return jsonify({'error': 'Unauthorized'}), 403
     
     category = GradeCategory.query.get_or_404(category_id)
@@ -139,7 +131,7 @@ def create_grade_item(category_id):
         related_assignment_id=data.get('related_assignment_id'),
         auto_calculate=data.get('auto_calculate', False),
         is_published=data.get('is_published', False),
-        created_by=current_user.teacher_profile.teacher_id if current_user.teacher_profile else None
+        created_by=g.user.teacher_profile.teacher_id if g.user.teacher_profile else None
     )
     
     db.session.add(item)
@@ -152,7 +144,7 @@ def create_grade_item(category_id):
 @api_login_required
 def update_grade_item(item_id):
     """??????"""
-    if current_user.role != 'teacher':
+    if g.user.role != 'teacher':
         return jsonify({'error': 'Unauthorized'}), 403
     
     item = GradeItem.query.get_or_404(item_id)
@@ -170,7 +162,7 @@ def update_grade_item(item_id):
 @api_login_required
 def delete_grade_item(item_id):
     """??????"""
-    if current_user.role != 'teacher':
+    if g.user.role != 'teacher':
         return jsonify({'error': 'Unauthorized'}), 403
     
     item = GradeItem.query.get_or_404(item_id)
@@ -186,7 +178,7 @@ def delete_grade_item(item_id):
 @api_login_required
 def get_item_scores(item_id):
     """??????????????"""
-    if current_user.role != 'teacher':
+    if g.user.role != 'teacher':
         return jsonify({'error': 'Unauthorized'}), 403
     
     item = GradeItem.query.get_or_404(item_id)
@@ -218,13 +210,13 @@ def get_item_scores(item_id):
 @api_login_required
 def batch_update_scores(item_id):
     """??????"""
-    if current_user.role != 'teacher':
+    if g.user.role != 'teacher':
         return jsonify({'error': 'Unauthorized'}), 403
     
     item = GradeItem.query.get_or_404(item_id)
     data = request.json.get('scores', [])
     
-    teacher_id = current_user.teacher_profile.teacher_id if current_user.teacher_profile else None
+    teacher_id = g.user.teacher_profile.teacher_id if g.user.teacher_profile else None
     
     for score_data in data:
         student_id = score_data.get('student_id')
@@ -346,7 +338,7 @@ def calculate_attendance_score(item_id):
 @api_login_required
 def calculate_final_grades(class_id):
     """?????????????"""
-    if current_user.role != 'teacher':
+    if g.user.role != 'teacher':
         return jsonify({'error': 'Unauthorized'}), 403
     
     # ??????
@@ -448,10 +440,10 @@ def calculate_final_grades(class_id):
 @api_login_required
 def get_my_grades(class_id):
     """?????????"""
-    if current_user.role != 'student':
+    if g.user.role != 'student':
         return jsonify({'error': 'Unauthorized'}), 403
     
-    student = current_user.student_profile
+    student = g.user.student_profile
     if not student:
         return jsonify({'error': 'Student profile not found'}), 404
     
@@ -511,7 +503,7 @@ def get_my_grades(class_id):
 @api_login_required
 def get_grade_statistics(class_id):
     """????????"""
-    if current_user.role != 'teacher':
+    if g.user.role != 'teacher':
         return jsonify({'error': 'Unauthorized'}), 403
     
     # ???????????
@@ -536,7 +528,7 @@ def get_grade_statistics(class_id):
             'message': '?????????????' if has_config else '????????'
         })
     
-    scores = [float(g.total_score) for g in final_grades if g.total_score]
+    scores = [float(grade.total_score) for grade in final_grades if grade.total_score]
     
     if not scores:
         return jsonify({
@@ -601,7 +593,7 @@ def get_grade_statistics(class_id):
 @api_login_required
 def get_all_grade_items(class_id):
     """???????????????????????"""
-    if current_user.role != 'teacher':
+    if g.user.role != 'teacher':
         return jsonify({'error': 'Unauthorized'}), 403
     
     # ???????????????????
@@ -629,7 +621,7 @@ def get_all_grade_items(class_id):
 @api_login_required
 def get_final_grades(class_id):
     """???????????"""
-    if current_user.role != 'teacher':
+    if g.user.role != 'teacher':
         return jsonify({'error': 'Unauthorized'}), 403
     
     # ??????
@@ -739,7 +731,7 @@ def get_final_grades(class_id):
 @api_login_required
 def update_single_score(item_id):
     """?????????"""
-    if current_user.role != 'teacher':
+    if g.user.role != 'teacher':
         return jsonify({'error': 'Unauthorized'}), 403
     
     data = request.get_json()
@@ -778,7 +770,7 @@ def update_single_score(item_id):
 def get_student_all_scores(class_id, student_id):
     """???????????????????"""
     try:
-        if current_user.role not in ['teacher', 'admin']:
+        if g.user.role not in ['teacher', 'admin']:
             return jsonify({'error': 'Unauthorized'}), 403
         
         # ?????????

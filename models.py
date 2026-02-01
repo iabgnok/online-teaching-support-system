@@ -916,7 +916,308 @@ class VAdminCourseStatistics(db.Model):
     total_enrollments = db.Column(db.Integer)
     active_enrollments = db.Column(db.Integer)
 
-# ==================== 关系配置（在所有模型定义后） ====================
+# ==================== 线上授课模块 ====================
 
-# 为 Admin 添加与 ForumModeration 的关系
-Admin.moderation_actions = db.relationship('ForumModeration', backref='moderator', lazy='dynamic', foreign_keys='ForumModeration.admin_id')
+class LiveClass(db.Model):
+    """线上课堂表"""
+    __tablename__ = 'LiveClass'
+    
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
+    lesson_id = db.Column(db.String(50), unique=True, nullable=False, index=True)  # 课堂唯一标识
+    teacher_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'), nullable=False)
+    class_id = db.Column(db.BigInteger, db.ForeignKey('TeachingClass.class_id'), nullable=False)
+    title = db.Column(db.String(200), nullable=False)  # 课堂标题
+    start_time = db.Column(db.DateTime(timezone=True), nullable=False)
+    end_time = db.Column(db.DateTime(timezone=True))
+    status = db.Column(db.String(20), default='active')  # active, ended
+    participants_count = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime(timezone=True), default=func.now())
+    updated_at = db.Column(db.DateTime(timezone=True), default=func.now(), onupdate=func.now())
+    
+    # 关系
+    teacher = db.relationship('Users', backref='live_classes')
+    teaching_class = db.relationship('TeachingClass', backref='live_classes')
+    drawings = db.relationship('DrawingData', backref='live_class', lazy='dynamic')
+    messages = db.relationship('ChatMessage', backref='live_class', lazy='dynamic')
+    participants = db.relationship('LiveParticipant', backref='live_class', lazy='dynamic')
+
+
+class DrawingData(db.Model):
+    """画板绘制数据表"""
+    __tablename__ = 'DrawingData'
+    
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
+    live_class_id = db.Column(db.BigInteger, db.ForeignKey('LiveClass.id'), nullable=False)
+    user_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'), nullable=False)
+    x_percent = db.Column(db.Float, nullable=False)  # 百分比坐标X
+    y_percent = db.Column(db.Float, nullable=False)  # 百分比坐标Y
+    color = db.Column(db.String(7), nullable=False)  # 颜色 #RRGGBB
+    brush_size = db.Column(db.Float, default=2.0)  # 笔刷大小
+    action = db.Column(db.String(20), default='draw')  # draw, erase
+    timestamp = db.Column(db.DateTime(timezone=True), default=func.now(), index=True)
+    
+    # 关系
+    user = db.relationship('Users', backref='drawings')
+
+
+class ChatMessage(db.Model):
+    """课堂聊天消息表"""
+    __tablename__ = 'ChatMessage'
+    
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
+    live_class_id = db.Column(db.BigInteger, db.ForeignKey('LiveClass.id'), nullable=False)
+    user_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'), nullable=False)
+    message = db.Column(db.Text, nullable=False)
+    message_type = db.Column(db.String(20), default='text')  # text, emoji, system
+    timestamp = db.Column(db.DateTime(timezone=True), default=func.now(), index=True)
+    
+    # 关系
+    user = db.relationship('Users', backref='chat_messages')
+
+
+class LiveParticipant(db.Model):
+    """课堂参与者表"""
+    __tablename__ = 'LiveParticipant'
+    
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
+    live_class_id = db.Column(db.BigInteger, db.ForeignKey('LiveClass.id'), nullable=False)
+    user_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'), nullable=False)
+    joined_at = db.Column(db.DateTime(timezone=True), default=func.now())
+    left_at = db.Column(db.DateTime(timezone=True))
+    role = db.Column(db.String(20), default='student')  # teacher, student
+    
+    # 关系
+    user = db.relationship('Users', backref='live_participations')
+
+
+class ClassNote(db.Model):
+    """课堂笔记表"""
+    __tablename__ = 'ClassNote'
+    
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
+    live_class_id = db.Column(db.BigInteger, db.ForeignKey('LiveClass.id'), nullable=False)
+    teacher_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'), nullable=False)
+    title = db.Column(db.String(200), nullable=False)
+    content = db.Column(db.Text)  # 自动生成的笔记内容
+    is_published = db.Column(db.Boolean, default=False)  # 是否发布给学生
+    created_at = db.Column(db.DateTime(timezone=True), default=func.now())
+    updated_at = db.Column(db.DateTime(timezone=True), default=func.now(), onupdate=func.now())
+    
+    # 关系
+    live_class = db.relationship('LiveClass', backref='notes')
+    teacher = db.relationship('Users', backref='class_notes')
+
+
+# ==================== 即时通讯模块 (IM System) ====================
+
+class Conversation(db.Model):
+    """对话表 - 支持一对一、群聊、班级群组、课程群组和直播课堂"""
+    __tablename__ = 'Conversation'
+    
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
+    conversation_type = db.Column(db.String(20), nullable=False, index=True)  # 'private', 'group', 'class_group', 'course_group', 'live_class'
+    title = db.Column(db.String(200))  # 对话标题（群组名称，私聊时为空）
+    avatar = db.Column(db.String(500))  # 群组头像URL
+    description = db.Column(db.Text)  # 群组描述
+    
+    # 关联信息
+    created_by = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'), nullable=False)
+    class_id = db.Column(db.BigInteger, db.ForeignKey('TeachingClass.class_id'), nullable=True)  # 课程班级关联
+    live_class_id = db.Column(db.BigInteger, db.ForeignKey('LiveClass.id'), nullable=True)  # 直播课堂关联
+    
+    # 状态
+    is_archived = db.Column(db.Boolean, default=False)  # 是否归档
+    is_active = db.Column(db.Boolean, default=True)  # 是否活跃
+    
+    # 时间戳
+    created_at = db.Column(db.DateTime(timezone=True), default=func.now())
+    updated_at = db.Column(db.DateTime(timezone=True), default=func.now(), onupdate=func.now(), index=True)
+    last_message_at = db.Column(db.DateTime(timezone=True))  # 最后一条消息时间
+    
+    # 关系
+    creator = db.relationship('Users', foreign_keys=[created_by], backref='created_conversations')
+    teaching_class = db.relationship('TeachingClass', foreign_keys=[class_id], backref='conversations')
+    live_class_rel = db.relationship('LiveClass', foreign_keys=[live_class_id], backref='conversation', uselist=False)
+    members = db.relationship('ConversationMember', backref='conversation', lazy='dynamic', cascade='all, delete-orphan')
+    messages = db.relationship('IMMessage', backref='conversation', lazy='dynamic', cascade='all, delete-orphan', order_by='IMMessage.created_at')
+
+
+class ConversationMember(db.Model):
+    """对话成员关系表"""
+    __tablename__ = 'ConversationMember'
+    
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
+    conversation_id = db.Column(db.BigInteger, db.ForeignKey('Conversation.id'), nullable=False, index=True)
+    user_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'), nullable=False, index=True)
+    
+    # 角色和权限
+    role = db.Column(db.String(20), default='member')  # 'owner', 'admin', 'member'
+    
+    # 个性化设置
+    is_muted = db.Column(db.Boolean, default=False)  # 是否静音
+    is_pinned = db.Column(db.Boolean, default=False)  # 是否置顶
+    custom_alias = db.Column(db.String(100))  # 自定义备注名
+    
+    # 阅读状态
+    last_read_message_id = db.Column(db.BigInteger)  # 最后已读消息ID
+    last_read_at = db.Column(db.DateTime(timezone=True))  # 最后阅读时间
+    unread_count = db.Column(db.Integer, default=0)  # 未读计数
+    
+    # 草稿
+    draft_content = db.Column(db.Text)  # 草稿内容
+    draft_updated_at = db.Column(db.DateTime(timezone=True))
+    
+    # 时间戳
+    joined_at = db.Column(db.DateTime(timezone=True), default=func.now())
+    left_at = db.Column(db.DateTime(timezone=True))  # 退出时间（为空表示还在群组中）
+    
+    # 关系
+    user = db.relationship('Users', backref='conversation_memberships')
+    
+    # 唯一约束
+    __table_args__ = (
+        db.UniqueConstraint('conversation_id', 'user_id', name='uq_conversation_member'),
+        db.Index('idx_conversation_member_user', 'user_id', 'conversation_id'),
+    )
+
+
+class IMMessage(db.Model):
+    """即时通讯消息表 - 统一的消息模型"""
+    __tablename__ = 'IMMessage'
+    
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
+    conversation_id = db.Column(db.BigInteger, db.ForeignKey('Conversation.id'), nullable=False, index=True)
+    sender_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'), nullable=False)
+    
+    # 消息内容
+    message_type = db.Column(db.String(20), default='text', index=True)  # 'text', 'image', 'file', 'voice', 'video', 'system', 'emoji'
+    content = db.Column(db.Text)  # 文本内容
+    
+    # 媒体文件
+    media_url = db.Column(db.String(500))  # 媒体文件URL
+    file_name = db.Column(db.String(255))  # 原始文件名
+    file_size = db.Column(db.BigInteger)  # 文件大小（字节）
+    mime_type = db.Column(db.String(100))  # MIME类型
+    
+    # 引用和回复
+    reply_to_id = db.Column(db.BigInteger, db.ForeignKey('IMMessage.id'))  # 回复的消息ID
+    forward_from_id = db.Column(db.BigInteger, db.ForeignKey('IMMessage.id'))  # 转发来源消息ID
+    
+    # 扩展元数据（JSON格式）
+    extra_data = db.Column(db.JSON)  # 如：提及的用户列表、链接预览、位置信息等
+    
+    # 状态标记
+    is_edited = db.Column(db.Boolean, default=False)  # 是否已编辑
+    is_deleted = db.Column(db.Boolean, default=False)  # 是否已删除
+    is_pinned = db.Column(db.Boolean, default=False)  # 是否置顶
+    
+    # 时间戳
+    created_at = db.Column(db.DateTime(timezone=True), default=func.now(), index=True)
+    edited_at = db.Column(db.DateTime(timezone=True))  # 编辑时间
+    deleted_at = db.Column(db.DateTime(timezone=True))  # 删除时间
+    
+    # 关系
+    sender = db.relationship('Users', foreign_keys=[sender_id], backref='im_messages')
+    reply_to = db.relationship('IMMessage', remote_side=[id], foreign_keys=[reply_to_id], backref='replies')
+    forward_from = db.relationship('IMMessage', remote_side=[id], foreign_keys=[forward_from_id], backref='forwards')
+    status_records = db.relationship('MessageStatus', backref='message', lazy='dynamic', cascade='all, delete-orphan')
+
+
+class MessageStatus(db.Model):
+    """消息状态跟踪表"""
+    __tablename__ = 'MessageStatus'
+    
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
+    message_id = db.Column(db.BigInteger, db.ForeignKey('IMMessage.id'), nullable=False, index=True)
+    user_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'), nullable=False, index=True)
+    
+    # 状态
+    status = db.Column(db.String(20), default='sent', index=True)  # 'sent', 'delivered', 'read'
+    timestamp = db.Column(db.DateTime(timezone=True), default=func.now())
+    
+    # 关系
+    user = db.relationship('Users', backref='message_statuses')
+    
+    # 唯一约束
+    __table_args__ = (
+        db.UniqueConstraint('message_id', 'user_id', name='uq_message_status'),
+        db.Index('idx_message_status', 'message_id', 'user_id', 'status'),
+    )
+
+
+class UserOnlineStatus(db.Model):
+    """用户在线状态表"""
+    __tablename__ = 'UserOnlineStatus'
+    
+    user_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'), primary_key=True)
+    is_online = db.Column(db.Boolean, default=False, index=True)
+    last_seen = db.Column(db.DateTime(timezone=True), default=func.now())
+    device_info = db.Column(db.String(200))  # 设备信息
+    socket_id = db.Column(db.String(100))  # Socket连接ID
+    
+    # 关系
+    user = db.relationship('Users', backref='online_status', uselist=False)
+
+
+class MessageReaction(db.Model):
+    """消息反应表 - 表情反馈"""
+    __tablename__ = 'MessageReaction'
+    
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
+    message_id = db.Column(db.BigInteger, db.ForeignKey('IMMessage.id'), nullable=False, index=True)
+    user_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'), nullable=False, index=True)
+    reaction = db.Column(db.String(10), nullable=False)  # emoji: '👍', '❤️', '😂', '😮', '😢', '🙏'
+    created_at = db.Column(db.DateTime(timezone=True), default=func.now())
+    
+    # 关系
+    message = db.relationship('IMMessage', backref='reactions')
+    user = db.relationship('Users', backref='message_reactions')
+    
+    # 唯一约束：每个用户对每条消息只能有一个反应
+    __table_args__ = (
+        db.UniqueConstraint('message_id', 'user_id', name='uq_message_reaction'),
+        db.Index('idx_message_reaction', 'message_id', 'reaction'),
+    )
+
+
+class PinnedMessage(db.Model):
+    """置顶消息表"""
+    __tablename__ = 'PinnedMessage'
+    
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
+    conversation_id = db.Column(db.BigInteger, db.ForeignKey('Conversation.id'), nullable=False, index=True)
+    message_id = db.Column(db.BigInteger, db.ForeignKey('IMMessage.id'), nullable=False, index=True)
+    pinned_by = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'), nullable=False)
+    pinned_at = db.Column(db.DateTime(timezone=True), default=func.now())
+    order_index = db.Column(db.Integer, default=0)  # 多条置顶消息的顺序
+    
+    # 关系
+    conversation = db.relationship('Conversation', backref='pinned_messages')
+    message = db.relationship('IMMessage', backref='pinned_records')
+    pinner = db.relationship('Users', foreign_keys=[pinned_by])
+    
+    # 唯一约束：每条消息在每个对话中只能被置顶一次
+    __table_args__ = (
+        db.UniqueConstraint('conversation_id', 'message_id', name='uq_pinned_message'),
+        db.Index('idx_conversation_pinned', 'conversation_id', 'order_index'),
+    )
+
+
+class MentionNotification(db.Model):
+    """@ 提及通知表"""
+    __tablename__ = 'MentionNotification'
+    
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
+    message_id = db.Column(db.BigInteger, db.ForeignKey('IMMessage.id'), nullable=False, index=True)
+    mentioned_user_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'), nullable=False, index=True)
+    is_read = db.Column(db.Boolean, default=False, index=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=func.now())
+    
+    # 关系
+    message = db.relationship('IMMessage', backref='mentions')
+    mentioned_user = db.relationship('Users', backref='mention_notifications')
+    
+    # 索引
+    __table_args__ = (
+        db.Index('idx_user_unread_mentions', 'mentioned_user_id', 'is_read'),
+    )

@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 """论坛管理和审核API"""
 
-from flask import Blueprint, jsonify, request, current_app
-from flask_login import current_user
+from flask import Blueprint, jsonify, request, current_app, g
 from models import (
     ForumPost, ForumComment, ForumModeration, ForumPostStatus,
     TeachingClass, TeacherClass, db, generate_next_id
@@ -36,7 +35,7 @@ def get_all_forum_posts():
         if author_id:
             query = query.filter_by(author_id=author_id)
         
-        # 应用状态过滤
+        # 应用状态过?
         if status_filter == 'hidden':
             query = query.join(ForumPostStatus).filter(ForumPostStatus.is_hidden == True)
         elif status_filter == 'locked':
@@ -91,7 +90,7 @@ def pin_post(post_id):
         post = ForumPost.query.get_or_404(post_id)
         
         data = request.get_json() or {}
-        reason = data.get('reason', '管理员置顶')
+        reason = data.get('reason', '?????')
         
         post.is_pinned = True
         
@@ -100,7 +99,7 @@ def pin_post(post_id):
             id=generate_next_id(ForumModeration, 'id'),
             content_type='post',
             post_id=post_id,
-            admin_id=current_user.admin_profile.admin_id,
+            admin_id=g.user.admin_profile.admin_id,
             action='pin',
             reason=reason,
             status='completed'
@@ -123,7 +122,7 @@ def unpin_post(post_id):
         post = ForumPost.query.get_or_404(post_id)
         
         data = request.get_json() or {}
-        reason = data.get('reason', '管理员取消置顶')
+        reason = data.get('reason', '???????')
         
         post.is_pinned = False
         
@@ -132,7 +131,7 @@ def unpin_post(post_id):
             id=generate_next_id(ForumModeration, 'id'),
             content_type='post',
             post_id=post_id,
-            admin_id=current_user.admin_profile.admin_id,
+            admin_id=g.user.admin_profile.admin_id,
             action='unpin',
             reason=reason,
             status='completed'
@@ -157,7 +156,7 @@ def hide_post(post_id):
         data = request.get_json() or {}
         reason = data.get('reason', '内容违规')
         
-        # 获取或创建状态记录
+        # 获取或创建状态记?
         status = ForumPostStatus.query.filter_by(post_id=post_id).first()
         if not status:
             status = ForumPostStatus(
@@ -167,14 +166,14 @@ def hide_post(post_id):
         
         status.is_hidden = True
         status.hide_reason = reason
-        status.hidden_by = current_user.admin_profile.admin_id
+        status.hidden_by = g.user.admin_profile.admin_id
         
         # 记录审核日志
         moderation = ForumModeration(
             id=generate_next_id(ForumModeration, 'id'),
             content_type='post',
             post_id=post_id,
-            admin_id=current_user.admin_profile.admin_id,
+            admin_id=g.user.admin_profile.admin_id,
             action='hide',
             reason=reason,
             status='completed'
@@ -207,7 +206,7 @@ def unhide_post(post_id):
             id=generate_next_id(ForumModeration, 'id'),
             content_type='post',
             post_id=post_id,
-            admin_id=current_user.admin_profile.admin_id,
+            admin_id=g.user.admin_profile.admin_id,
             action='unhide',
             reason='管理员恢复显示',
             status='completed'
@@ -227,14 +226,14 @@ def unhide_post(post_id):
 @forum_mgmt_bp.route('/admin/posts/<int:post_id>/lock', methods=['POST'])
 @forum_admin_required
 def lock_post(post_id):
-    """锁定帖子（禁止回复）"""
+    """????(????)"""
     try:
         post = ForumPost.query.get_or_404(post_id)
         
         data = request.get_json() or {}
-        reason = data.get('reason', '讨论已结束')
+        reason = data.get('reason', '?????')
         
-        # 获取或创建状态记录
+        # 获取或创建状态记?
         status = ForumPostStatus.query.filter_by(post_id=post_id).first()
         if not status:
             status = ForumPostStatus(
@@ -244,14 +243,14 @@ def lock_post(post_id):
         
         status.is_locked = True
         status.lock_reason = reason
-        status.locked_by = current_user.admin_profile.admin_id
+        status.locked_by = g.user.admin_profile.admin_id
         
         # 记录审核日志
         moderation = ForumModeration(
             id=generate_next_id(ForumModeration, 'id'),
             content_type='post',
             post_id=post_id,
-            admin_id=current_user.admin_profile.admin_id,
+            admin_id=g.user.admin_profile.admin_id,
             action='lock',
             reason=reason,
             status='completed'
@@ -284,7 +283,7 @@ def unlock_post(post_id):
             id=generate_next_id(ForumModeration, 'id'),
             content_type='post',
             post_id=post_id,
-            admin_id=current_user.admin_profile.admin_id,
+            admin_id=g.user.admin_profile.admin_id,
             action='unlock',
             reason='管理员解锁',
             status='completed'
@@ -304,7 +303,7 @@ def unlock_post(post_id):
 @forum_mgmt_bp.route('/admin/posts/<int:post_id>/delete', methods=['DELETE'])
 @forum_admin_required
 def admin_delete_post(post_id):
-    """管理员删除帖子（保存备份）"""
+    """管理员删除帖子(保存备份)"""
     try:
         post = ForumPost.query.get_or_404(post_id)
         
@@ -316,7 +315,7 @@ def admin_delete_post(post_id):
             id=generate_next_id(ForumModeration, 'id'),
             content_type='post',
             post_id=post_id,
-            admin_id=current_user.admin_profile.admin_id,
+            admin_id=g.user.admin_profile.admin_id,
             action='delete',
             reason=reason,
             content_snapshot=f"标题: {post.title}\n内容: {post.content}",
@@ -361,7 +360,7 @@ def admin_delete_comment(comment_id):
             content_type='comment',
             comment_id=comment_id,
             post_id=post_id,
-            admin_id=current_user.admin_profile.admin_id,
+            admin_id=g.user.admin_profile.admin_id,
             action='delete',
             reason=reason,
             content_snapshot=f"评论: {comment.content}",
@@ -552,7 +551,7 @@ def reverse_moderation_action(log_id):
         
         log.status = 'reversed'
         log.reversed_at = datetime.now()
-        log.reversed_by = current_user.admin_profile.admin_id
+        log.reversed_by = g.user.admin_profile.admin_id
         
         db.session.commit()
         
@@ -562,7 +561,7 @@ def reverse_moderation_action(log_id):
         return jsonify({'error': str(e)}), 500
 
 
-# ==================== 统计和报告 ====================
+# ==================== 统计和报?====================
 
 @forum_mgmt_bp.route('/admin/statistics', methods=['GET'])
 @forum_admin_required
@@ -584,7 +583,7 @@ def get_forum_statistics():
             ForumPost.class_id
         ).order_by(db.func.count(ForumPost.id).desc()).limit(10).all()
         
-        # 最活跃的用户
+        # 最活跃的用?
         active_users = db.session.query(
             ForumPost.author_id,
             db.func.count(ForumPost.id).label('post_count')

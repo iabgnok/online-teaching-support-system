@@ -1,26 +1,15 @@
-from flask import jsonify, request
+from flask import jsonify, request, g
 from models import Message, Users, db, generate_next_id
 from . import api_v1
 from sqlalchemy import or_
 from datetime import datetime
-from functools import wraps
-from flask_login import current_user
-
-# 自定义认证装饰器，用于 API 端点
-def api_login_required(f):
-    """检查用户是否登录，如果未登录则返回 401"""
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if not current_user.is_authenticated:
-            return jsonify({'error': 'Authentication required'}), 401
-        return f(*args, **kwargs)
-    return decorated_function
+from .auth import api_login_required
 
 @api_v1.route('/messages', methods=['GET'])
 @api_login_required
 def get_messages():
     """获取所有消息 (收件箱)"""
-    messages = Message.query.filter_by(recipient_id=current_user.user_id, is_deleted_by_recipient=False).order_by(Message.created_at.desc()).all()
+    messages = Message.query.filter_by(recipient_id=g.user.user_id, is_deleted_by_recipient=False).order_by(Message.created_at.desc()).all()
     
     results = []
     for m in messages:
@@ -38,7 +27,7 @@ def get_messages():
 @api_login_required
 def get_sent_messages():
     """获取已发送消息"""
-    messages = Message.query.filter_by(sender_id=current_user.user_id, is_deleted_by_sender=False).order_by(Message.created_at.desc()).all()
+    messages = Message.query.filter_by(sender_id=g.user.user_id, is_deleted_by_sender=False).order_by(Message.created_at.desc()).all()
     
     results = []
     for m in messages:
@@ -75,7 +64,7 @@ def send_message():
         
     message = Message(
         id=generate_next_id(Message, 'id'),
-        sender_id=current_user.user_id,
+        sender_id=g.user.user_id,
         recipient_id=recipient_id,
         content=content
     )
@@ -89,7 +78,7 @@ def send_message():
 def mark_message_read(message_id):
     """标记消息为已读"""
     message = Message.query.get_or_404(message_id)
-    if message.recipient_id != current_user.user_id:
+    if message.recipient_id != g.user.user_id:
         return jsonify({'error': 'Unauthorized'}), 403
     
     if not message.read_at:

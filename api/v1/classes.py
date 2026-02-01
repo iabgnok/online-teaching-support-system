@@ -1,5 +1,5 @@
-from flask import Blueprint, jsonify, request, current_app
-from flask_login import current_user, login_required
+from flask import Blueprint, jsonify, request, current_app, g
+from .auth import api_login_required
 from models import (
     db, TeachingClass, StudentClass, TeacherClass, 
     Material, Assignment, Submission, Grade, generate_next_id
@@ -11,13 +11,21 @@ from werkzeug.utils import secure_filename
 classes_bp = Blueprint('classes', __name__)
 
 @classes_bp.route('/student/stats', methods=['GET'])
-@login_required
+@api_login_required
 def get_student_stats():
     """获取学生首页统计数据"""
-    if current_user.role != 'student':
+    if g.user.role != 'student':
         return jsonify({})
     
-    student = current_user.student_profile
+    student = g.user.student_profile
+    if not student:
+        return jsonify({
+            'total_courses': 0,
+            'total_pending': 0,
+            'average_grade': 0.0,
+            'graded_count': 0
+        })
+    
     stats = {
         'total_courses': 0,
         'total_pending': 0,
@@ -37,9 +45,9 @@ def get_student_stats():
     grades = Grade.query.filter(Grade.student_id == student.student_id, Grade.class_id.in_(class_ids)).all()
     total_score = 0
     graded_count = 0
-    for g in grades:
-        if g.final_grade is not None:
-            total_score += float(g.final_grade)
+    for grade in grades:
+        if grade.final_grade is not None:
+            total_score += float(grade.final_grade)
             graded_count += 1
     
     stats['graded_count'] = graded_count
@@ -67,13 +75,13 @@ def get_student_stats():
 
 
 @classes_bp.route('/teacher/stats', methods=['GET'])
-@login_required
+@api_login_required
 def get_teacher_stats():
     """获取教师首页统计数据"""
-    if current_user.role != 'teacher':
+    if g.user.role != 'teacher':
         return jsonify({})
     
-    teacher = current_user.teacher_profile
+    teacher = g.user.teacher_profile
     if not teacher:
          return jsonify({'active_courses': 0, 'total_students': 0, 'pending_grading': 0})
 
@@ -109,18 +117,20 @@ def get_teacher_stats():
 
 
 @classes_bp.route('/my', methods=['GET'])
-@login_required
+@api_login_required
 def get_my_classes():
     """获取我的班级列表"""
     classes_data = []
     
-    if current_user.role == 'student':
-        student = current_user.student_profile
+    if g.user.role == 'student':
+        student = g.user.student_profile
         if student:
             enrollments = StudentClass.query.filter_by(student_id=student.student_id, status=1).all()
             for enroll in enrollments:
                 tc = enroll.teaching_class
                 course = tc.course
+                if not course:
+                    continue  # 跳过没有课程的班级
                 teacher_main = TeacherClass.query.filter_by(class_id=tc.class_id, role='main').first()
                 teacher_name = teacher_main.teacher.name if teacher_main else "未分配"
                 
@@ -150,13 +160,15 @@ def get_my_classes():
                     'pending_count': pending_count
                 })
 
-    elif current_user.role == 'teacher':
-        teacher = current_user.teacher_profile
+    elif g.user.role == 'teacher':
+        teacher = g.user.teacher_profile
         if teacher:
             teachings = TeacherClass.query.filter_by(teacher_id=teacher.teacher_id).all()
             for t in teachings:
                 tc = t.teaching_class
                 course = tc.course
+                if not course:
+                    continue  # 跳过没有课程的班级
                 
                 # Calculate pending grading (Assignment in this class -> Submissions where status='submitted')
                 pending_grading = Submission.query.join(Assignment).filter(
@@ -177,7 +189,7 @@ def get_my_classes():
                     'pending_grading': pending_grading
                 })
                 
-    elif current_user.role == 'admin':
+    elif g.user.role == 'admin':
         # 管理员可以看到所有班级，或者返回空列表提示使用后台管理
         # 这里仅返回前20个作为示例，或实现搜索
         pass
@@ -185,7 +197,7 @@ def get_my_classes():
     return jsonify(classes_data)
 
 @classes_bp.route('/<int:class_id>/materials', methods=['GET'])
-@login_required
+@api_login_required
 def get_class_materials(class_id):
     """获取班级资料"""
     # 鉴权：检查用户是否在班级中（略，简化处理）
@@ -204,14 +216,14 @@ def get_class_materials(class_id):
     return jsonify(data)
 
 @classes_bp.route('/<int:class_id>/materials', methods=['POST'])
-@login_required
+@api_login_required
 def upload_material(class_id):
     """上传班级资料"""
-    if current_user.role != 'teacher':
+    if g.user.role != 'teacher':
         return jsonify({'error': 'Unauthorized'}), 403
         
     # Check permissions
-    teacher = current_user.teacher_profile
+    teacher = g.user.teacher_profile
     has_access = TeacherClass.query.filter_by(teacher_id=teacher.teacher_id, class_id=class_id).first()
     if not has_access:
         return jsonify({'error': 'You do not teach this class'}), 403
@@ -257,16 +269,16 @@ def upload_material(class_id):
 
 
 @classes_bp.route('/materials/<int:material_id>', methods=['DELETE'])
-@login_required
+@api_login_required
 def delete_material(material_id):
     """删除课件资料"""
-    if current_user.role != 'teacher':
+    if g.user.role != 'teacher':
         return jsonify({'error': 'Unauthorized'}), 403
     
     material = Material.query.get_or_404(material_id)
     
     # 验证权限
-    teacher = current_user.teacher_profile
+    teacher = g.user.teacher_profile
     if not teacher or material.teacher_id != teacher.teacher_id:
         return jsonify({'error': 'You can only delete your own materials'}), 403
     
@@ -285,14 +297,14 @@ def delete_material(material_id):
     return jsonify({'message': 'Material deleted successfully'})
 
 @classes_bp.route('/<int:class_id>/students', methods=['GET'])
-@login_required
+@api_login_required
 def get_class_students(class_id):
     """获取班级学生名单"""
     # 鉴权：检查用户是否在班级中
-    if current_user.role == 'teacher':
+    if g.user.role == 'teacher':
         # Check if teacher teaches this class
-        has_access = TeacherClass.query.filter_by(teacher_id=current_user.teacher_profile.teacher_id, class_id=class_id).first()
-        if not has_access and current_user.role != 'admin': # Admin usually has access
+        has_access = TeacherClass.query.filter_by(teacher_id=g.user.teacher_profile.teacher_id, class_id=class_id).first()
+        if not has_access and g.user.role != 'admin': # Admin usually has access
              return jsonify({'error': '无权访问该班级'}), 403
              
     enrollments = StudentClass.query.filter_by(class_id=class_id, status=1).all()
@@ -314,7 +326,7 @@ def get_class_students(class_id):
     return jsonify(data)
 
 @classes_bp.route('/<int:class_id>/assignments', methods=['GET'])
-@login_required
+@api_login_required
 def get_class_assignments(class_id):
     """获取班级作业"""
     assignments = Assignment.query.filter_by(class_id=class_id).order_by(Assignment.deadline.desc()).all()
@@ -335,8 +347,8 @@ def get_class_assignments(class_id):
         }
         
         # 如果是学生，查看提交状态
-        if current_user.role == 'student':
-            sub = Submission.query.filter_by(assignment_id=a.assignment_id, student_id=current_user.student_profile.student_id).first()
+        if g.user.role == 'student':
+            sub = Submission.query.filter_by(assignment_id=a.assignment_id, student_id=g.user.student_profile.student_id).first()
             if sub:
                 item['submission_status'] = sub.status
                 item['submission_time'] = sub.submit_time.isoformat()
@@ -348,7 +360,7 @@ def get_class_assignments(class_id):
                     item['is_overdue'] = True
         
         # 如果是教师，查看提交统计
-        elif current_user.role == 'teacher':
+        elif g.user.role == 'teacher':
              total_students = StudentClass.query.filter_by(class_id=class_id, status=1).count()
              # Submitted: status='submitted' | Graded: status='graded'
              submitted_count = Submission.query.filter_by(assignment_id=a.assignment_id, status='submitted').count()
@@ -367,19 +379,19 @@ def get_class_assignments(class_id):
     return jsonify(data)
 
 @classes_bp.route('/<int:class_id>/grades', methods=['GET'])
-@login_required
+@api_login_required
 def get_class_grades(class_id):
     """获取班级成绩单"""
     # 权限检查
     is_teacher = False
-    if current_user.role == 'teacher':
-        teacher = current_user.teacher_profile
+    if g.user.role == 'teacher':
+        teacher = g.user.teacher_profile
         has_access = TeacherClass.query.filter_by(teacher_id=teacher.teacher_id, class_id=class_id).first()
         if not has_access:
             return jsonify({'error': 'Unauthorized'}), 403
         is_teacher = True
-    elif current_user.role == 'student':
-        student = current_user.student_profile
+    elif g.user.role == 'student':
+        student = g.user.student_profile
         has_access = StudentClass.query.filter_by(student_id=student.student_id, class_id=class_id).first()
         if not has_access:
            return jsonify({'error': 'Unauthorized'}), 403
@@ -399,7 +411,7 @@ def get_class_grades(class_id):
     # 2. Get Students (Rows)
     query = StudentClass.query.filter_by(class_id=class_id, status=1)
     if not is_teacher: # Student only sees self
-        query = query.filter_by(student_id=current_user.student_profile.student_id)
+        query = query.filter_by(student_id=g.user.student_profile.student_id)
         
     enrollments = query.all()
     student_ids = [e.student_id for e in enrollments]
@@ -422,7 +434,7 @@ def get_class_grades(class_id):
         Grade.class_id == class_id,
         Grade.student_id.in_(student_ids)
     ).all()
-    grade_map = {g.student_id: g for g in grades}
+    grade_map = {grade.student_id: grade for grade in grades}
 
     # Construct Response
     rows = []
@@ -451,13 +463,13 @@ def get_class_grades(class_id):
 
 
 @classes_bp.route('/my-classes', methods=['GET'])
-@login_required
+@api_login_required
 def get_teacher_my_classes():
     """获取当前教师的班级列表"""
-    if current_user.role != 'teacher':
+    if g.user.role != 'teacher':
         return jsonify({'error': 'Only teachers can access this endpoint'}), 403
     
-    teacher = current_user.teacher_profile
+    teacher = g.user.teacher_profile
     if not teacher:
         return jsonify({'error': 'Teacher profile not found'}), 404
     

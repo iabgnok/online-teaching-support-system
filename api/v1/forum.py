@@ -1,22 +1,11 @@
 # -*- coding: utf-8 -*-
-from flask import jsonify, request, current_app
-from flask_login import current_user
-from functools import wraps
+from flask import jsonify, request, current_app, g
 from models import ForumPost, ForumComment, TeachingClass, TeacherClass, StudentClass, db, generate_next_id
 from . import api_v1
 from datetime import datetime
 import os
 from werkzeug.utils import secure_filename
-
-
-def api_login_required(f):
-    """API????????401 JSON?????"""
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if not current_user.is_authenticated:
-            return jsonify({'error': 'Authentication required'}), 401
-        return f(*args, **kwargs)
-    return decorated_function
+from .auth import api_login_required
 
 
 def allowed_file(filename):
@@ -27,8 +16,8 @@ def allowed_file(filename):
 def get_my_classes():
     classes = []
     try:
-        if current_user.role == 'student':
-            student_profile = current_user.student_profile
+        if g.user.role == 'student':
+            student_profile = g.user.student_profile
             if not student_profile:
                 return jsonify([])
             # enrollments via StudentClass
@@ -39,8 +28,8 @@ def get_my_classes():
                         'id': e.class_id,
                         'name': f"{e.teaching_class.class_name}"
                     })
-        elif current_user.role == 'teacher':
-            teacher_profile = current_user.teacher_profile
+        elif g.user.role == 'teacher':
+            teacher_profile = g.user.teacher_profile
             if not teacher_profile:
                 return jsonify([])
             assignments = TeacherClass.query.filter_by(teacher_id=teacher_profile.teacher_id).all()
@@ -50,7 +39,7 @@ def get_my_classes():
                         'id': a.class_id,
                         'name': f"{a.teaching_class.class_name}"
                     })
-        elif current_user.role == 'admin':
+        elif g.user.role == 'admin':
              all_classes = TeachingClass.query.all()
              for c in all_classes:
                  classes.append({
@@ -112,7 +101,7 @@ def create_forum_post(class_id):
         class_id=class_id,
         title=title,
         content=content,
-        author_id=current_user.user_id
+        author_id=g.user.user_id
     )
 
     if file and allowed_file(file.filename):
@@ -198,16 +187,16 @@ def delete_post(post_id):
     can_delete = False
     
     # 1. Admin
-    if current_user.role == 'admin':
+    if g.user.role == 'admin':
         can_delete = True
     # 2. Author
-    elif post.author_id == current_user.user_id:
+    elif post.author_id == g.user.user_id:
         can_delete = True
     # 3. Teacher of this class
-    elif current_user.role == 'teacher':
+    elif g.user.role == 'teacher':
         # Check if teacher teaches this class
         is_teacher = TeacherClass.query.filter_by(
-            teacher_id=current_user.teacher_profile.teacher_id, 
+            teacher_id=g.user.teacher_profile.teacher_id, 
             class_id=post.class_id
         ).first()
         if is_teacher:
@@ -236,7 +225,7 @@ def update_post(post_id):
     post = ForumPost.query.get_or_404(post_id)
     
     # Only author can edit (or maybe admin, but requirement says author edit own)
-    if post.author_id != current_user.user_id and current_user.role != 'admin':
+    if post.author_id != g.user.user_id and g.user.role != 'admin':
          return jsonify({'error': 'Permission denied'}), 403
 
     data = request.get_json()
@@ -265,7 +254,7 @@ def add_comment(post_id):
         id=generate_next_id(ForumComment, 'id'),
         post_id=post_id,
         content=content,
-        author_id=current_user.user_id,
+        author_id=g.user.user_id,
         parent_id=parent_id
     )
     
@@ -282,13 +271,13 @@ def delete_comment(comment_id):
     # Permission Check (Similar logic to post)
     can_delete = False
     
-    if current_user.role == 'admin':
+    if g.user.role == 'admin':
         can_delete = True
-    elif comment.author_id == current_user.user_id:
+    elif comment.author_id == g.user.user_id:
         can_delete = True
-    elif current_user.role == 'teacher':
+    elif g.user.role == 'teacher':
         is_teacher = TeacherClass.query.filter_by(
-            teacher_id=current_user.teacher_profile.teacher_id, 
+            teacher_id=g.user.teacher_profile.teacher_id, 
             class_id=post.class_id
         ).first()
         if is_teacher:
@@ -306,7 +295,7 @@ def delete_comment(comment_id):
 def update_comment(comment_id):
     comment = ForumComment.query.get_or_404(comment_id)
     
-    if comment.author_id != current_user.user_id and current_user.role != 'admin':
+    if comment.author_id != g.user.user_id and g.user.role != 'admin':
          return jsonify({'error': 'Permission denied'}), 403
 
     data = request.get_json()

@@ -4,9 +4,9 @@
 """
 
 from functools import wraps
-from flask import jsonify, current_app
-from flask_login import current_user
-from models import Admin
+from flask import jsonify, current_app, request, g
+from itsdangerous import URLSafeTimedSerializer as Serializer
+from models import Admin, Users
 
 
 class PermissionDeniedError(Exception):
@@ -23,20 +23,32 @@ def api_login_required(f):
     """API 登录装饰器 - 返回 JSON 401"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if not current_user.is_authenticated:
-            return jsonify({'error': 'Authentication required'}), 401
-        return f(*args, **kwargs)
+        # 首先尝试从Authorization头获取token
+        token = request.headers.get('Authorization')
+        if token and token.startswith('Bearer '):
+            token = token[7:]  # Remove 'Bearer ' prefix
+            try:
+                s = Serializer(current_app.config['SECRET_KEY'])
+                data = s.loads(token, max_age=None)
+                user_id = data.get('user_id')
+                user = Users.query.get(user_id)
+                if user and user.status == 1:
+                    g.user = user
+                    return f(*args, **kwargs)
+            except Exception as e:
+                print(f"Token validation error in permission_manager: {e}")
+                pass
+        
+        return jsonify({'error': 'Authentication required'}), 401
     return decorated_function
 
 
 def admin_required(f):
     """要求管理员角色"""
     @wraps(f)
+    @api_login_required
     def decorated_function(*args, **kwargs):
-        if not current_user.is_authenticated:
-            return jsonify({'error': 'Authentication required'}), 401
-        
-        if current_user.role != 'admin':
+        if g.user.role != 'admin':
             return jsonify({'error': 'Admin access required'}), 403
         
         return f(*args, **kwargs)
@@ -54,14 +66,12 @@ def admin_permission_required(min_level):
     """
     def decorator(f):
         @wraps(f)
+        @api_login_required
         def decorated_function(*args, **kwargs):
-            if not current_user.is_authenticated:
-                return jsonify({'error': 'Authentication required'}), 401
-            
-            if current_user.role != 'admin':
+            if g.user.role != 'admin':
                 return jsonify({'error': 'Admin access required'}), 403
             
-            admin_profile = current_user.admin_profile
+            admin_profile = g.user.admin_profile
             if not admin_profile:
                 return jsonify({'error': 'Admin profile not found'}), 403
             
@@ -83,14 +93,12 @@ def feature_permission_required(*features):
     """
     def decorator(f):
         @wraps(f)
+        @api_login_required
         def decorated_function(*args, **kwargs):
-            if not current_user.is_authenticated:
-                return jsonify({'error': 'Authentication required'}), 401
-            
-            if current_user.role != 'admin':
+            if g.user.role != 'admin':
                 return jsonify({'error': 'Admin access required'}), 403
             
-            admin_profile = current_user.admin_profile
+            admin_profile = g.user.admin_profile
             if not admin_profile:
                 return jsonify({'error': 'Admin profile not found'}), 403
             
@@ -98,8 +106,7 @@ def feature_permission_required(*features):
             for feature in features:
                 if not admin_profile.has_feature_permission(feature):
                     return jsonify({
-                        'error': f'Permission denied: {feature}',
-                        'required_permission': feature
+                        'error': f'Missing required feature permission: {feature}'
                     }), 403
             
             return f(*args, **kwargs)
@@ -110,14 +117,12 @@ def feature_permission_required(*features):
 def forum_admin_required(f):
     """论坛管理员装饰器 - 要求论坛管理权限"""
     @wraps(f)
+    @api_login_required
     def decorated_function(*args, **kwargs):
-        if not current_user.is_authenticated:
-            return jsonify({'error': 'Authentication required'}), 401
-        
-        if current_user.role != 'admin':
+        if g.user.role != 'admin':
             return jsonify({'error': 'Admin access required'}), 403
         
-        admin_profile = current_user.admin_profile
+        admin_profile = g.user.admin_profile
         if not admin_profile or not admin_profile.can_manage_forum:
             return jsonify({'error': 'Forum management permission required'}), 403
         
@@ -128,14 +133,12 @@ def forum_admin_required(f):
 def content_reviewer_required(f):
     """内容审核员装饰器"""
     @wraps(f)
+    @api_login_required
     def decorated_function(*args, **kwargs):
-        if not current_user.is_authenticated:
-            return jsonify({'error': 'Authentication required'}), 401
-        
-        if current_user.role != 'admin':
+        if g.user.role != 'admin':
             return jsonify({'error': 'Admin access required'}), 403
         
-        admin_profile = current_user.admin_profile
+        admin_profile = g.user.admin_profile
         if not admin_profile or not admin_profile.can_review_content:
             return jsonify({'error': 'Content review permission required'}), 403
         
@@ -154,10 +157,10 @@ def check_admin_permission(permission_level):
     Returns:
         True 如果有权限, False 否则
     """
-    if not current_user.is_authenticated or current_user.role != 'admin':
+    if not hasattr(g, 'user') or not g.user or g.user.role != 'admin':
         return False
     
-    admin_profile = current_user.admin_profile
+    admin_profile = g.user.admin_profile
     if not admin_profile:
         return False
     
@@ -173,10 +176,10 @@ def check_feature_permission(feature):
     Returns:
         True 如果有权限, False 否则
     """
-    if not current_user.is_authenticated or current_user.role != 'admin':
+    if not hasattr(g, 'user') or not g.user or g.user.role != 'admin':
         return False
     
-    admin_profile = current_user.admin_profile
+    admin_profile = g.user.admin_profile
     if not admin_profile:
         return False
     
@@ -189,10 +192,10 @@ def get_admin_permissions():
     Returns:
         权限信息字典，如果不是管理员返回 None
     """
-    if not current_user.is_authenticated or current_user.role != 'admin':
+    if not hasattr(g, 'user') or not g.user or g.user.role != 'admin':
         return None
     
-    admin_profile = current_user.admin_profile
+    admin_profile = g.user.admin_profile
     if not admin_profile:
         return None
     

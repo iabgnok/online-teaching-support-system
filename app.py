@@ -5,17 +5,23 @@ from flask import Flask, redirect, url_for, request, flash, abort, send_file, ma
 from functools import wraps
 from flask_sqlalchemy import SQLAlchemy 
 from flask_login import LoginManager, login_user, logout_user, current_user, login_required 
+from flask_cors import CORS
+from extensions import socketio
 from config import DevelopmentConfig
 import csv
 import io
 from datetime import datetime
 import os
+import threading
+import webbrowser
 from werkzeug.utils import secure_filename  
 from models import (
     Users, Admin, Student, Teacher, Course, TeachingClass, StudentClass, TeacherClass, 
     Assignment, Submission, Grade, Material, Department, Announcement, Attendance, AttendanceRecord, db,
     # 新成绩系统
     GradeCategory, GradeItem, StudentGradeScore, StudentFinalGrade,
+    # 线上授课系统
+    LiveClass, DrawingData, ChatMessage, LiveParticipant, ClassNote,
     # 视图模型
     VStudentMyCourses, VStudentMyAssignments, VStudentMyGrades,
     VTeacherMyClasses, VTeacherStudentList, VTeacherSubmissionStatus,
@@ -27,6 +33,14 @@ from models import (
 app = Flask(__name__)
 app.config.from_object(DevelopmentConfig)
 
+# ==================== SocketIO 初始化 ====================
+socketio.init_app(app, cors_allowed_origins="*", async_mode='eventlet')
+CORS(app, supports_credentials=True)
+
+# ==================== Register Socket Events ====================
+from api.v1.live_socket import register_socket_events
+register_socket_events(socketio)
+
 # ==================== Blueprint Registration ====================
 from api.v1 import api_v1
 from api.v1.classes import classes_bp
@@ -35,6 +49,7 @@ from api.v1.attendance import attendance_bp
 from api.v1.grades import grades_bp
 from api.v1.admin import admin_bp
 from api.v1.forum_management import forum_mgmt_bp
+from api.v1.live_class import live_class_bp
 
 app.register_blueprint(api_v1)
 app.register_blueprint(classes_bp, url_prefix='/api/v1/classes')
@@ -43,11 +58,12 @@ app.register_blueprint(attendance_bp, url_prefix='/api/v1/attendance')
 app.register_blueprint(grades_bp)
 app.register_blueprint(admin_bp, url_prefix='/api/v1/admin')
 app.register_blueprint(forum_mgmt_bp)
+app.register_blueprint(live_class_bp, url_prefix='/api/v1/live-class')
 
 # ==================== 扩展初始化 ====================
 db.init_app(app)
 login_manager = LoginManager(app)
-login_manager.login_view = 'login'
+login_manager.login_view = 'api_v1.api_login'
 login_manager.login_message_category = 'info'
 
 # Session配置
@@ -383,4 +399,5 @@ if __name__ == '__main__':
         # 使用线程启动，以免阻塞 Flask 启动
         threading.Thread(target=start_frontend_and_open_browser).start()
 
-    app.run(debug=True, port=5000)
+    # 使用 SocketIO 启动方式
+    socketio.run(app, debug=True, port=5000, use_reloader=True)

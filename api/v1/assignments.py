@@ -1,15 +1,15 @@
-from flask import Blueprint, jsonify, request
-from flask_login import login_required, current_user
+from flask import Blueprint, jsonify, request, g
+from .auth import api_login_required
 from models import db, Assignment, Submission, TeacherClass, StudentClass, Student, generate_next_id
 from datetime import datetime
 
 assignments_bp = Blueprint('assignments', __name__, url_prefix='/assignments')
 
 @assignments_bp.route('/', methods=['POST'])
-@login_required
+@api_login_required
 def create_assignment():
     """发布新作业"""
-    if current_user.role != 'teacher':
+    if g.user.role != 'teacher':
         return jsonify({'error': 'Unauthorized'}), 403
         
     data = request.get_json()
@@ -23,7 +23,7 @@ def create_assignment():
         return jsonify({'error': 'Missing required fields'}), 400
         
     # Check permissions
-    teacher = current_user.teacher_profile
+    teacher = g.user.teacher_profile
     if not teacher:
         return jsonify({'error': 'Teacher profile not found'}), 404
         
@@ -65,7 +65,7 @@ def create_assignment():
         return jsonify({'error': f'Database error: {str(e)}'}), 500
 
 @assignments_bp.route('/<int:assignment_id>', methods=['GET'])
-@login_required
+@api_login_required
 def get_assignment_detail(assignment_id):
     """获取作业详情"""
     assignment = Assignment.query.get_or_404(assignment_id)
@@ -84,10 +84,10 @@ def get_assignment_detail(assignment_id):
     })
 
 @assignments_bp.route('/<int:assignment_id>/submissions', methods=['GET'])
-@login_required
+@api_login_required
 def get_submissions(assignment_id):
     """获取某作业的所有提交（教师端）"""
-    if current_user.role != 'teacher':
+    if g.user.role != 'teacher':
         return jsonify({'error': 'Unauthorized'}), 403
         
     assignment = Assignment.query.get_or_404(assignment_id)
@@ -130,10 +130,10 @@ def get_submissions(assignment_id):
     return jsonify(data)
 
 @assignments_bp.route('/<int:assignment_id>/submissions/<int:student_id>', methods=['POST'])
-@login_required
+@api_login_required
 def grade_submission(assignment_id, student_id):
     """批改作业 (创建或更新 Submission)"""
-    if current_user.role != 'teacher':
+    if g.user.role != 'teacher':
         return jsonify({'error': 'Unauthorized'}), 403
         
     data = request.json
@@ -161,7 +161,7 @@ def grade_submission(assignment_id, student_id):
     sub.score = score
     sub.feedback = feedback
     sub.status = 'graded'
-    sub.graded_by = current_user.teacher_profile.teacher_id
+    sub.graded_by = g.user.teacher_profile.teacher_id
     sub.graded_time = datetime.now()
     
     db.session.commit()
@@ -170,10 +170,10 @@ def grade_submission(assignment_id, student_id):
 
 
 @assignments_bp.route('/<int:assignment_id>/grades', methods=['GET'])
-@login_required
+@api_login_required
 def get_assignment_grades(assignment_id):
     """获取某作业的所有学生成绩（教师端）"""
-    if current_user.role != 'teacher':
+    if g.user.role != 'teacher':
         return jsonify({'error': 'Unauthorized'}), 403
     
     assignment = Assignment.query.get_or_404(assignment_id)

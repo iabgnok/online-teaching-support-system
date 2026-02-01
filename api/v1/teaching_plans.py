@@ -1,5 +1,5 @@
-from flask import Blueprint, jsonify, request
-from flask_login import current_user, login_required
+from flask import Blueprint, jsonify, request, g
+from .auth import api_login_required
 from models import db, TeachingPlan, TeachingClass, TeacherClass, PersonalTask, Student, StudentClass
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import and_, or_, func
@@ -17,13 +17,13 @@ def make_aware(dt):
 # ==================== 教学计划API ====================
 
 @api_v1.route('/teaching-plans', methods=['GET'])
-@login_required
+@api_login_required
 def get_teaching_plans():
     """获取教学计划列表（教师端）"""
-    if current_user.role != 'teacher':
+    if g.user.role != 'teacher':
         return jsonify({'error': 'Only teachers can access teaching plans'}), 403
     
-    teacher = current_user.teacher_profile
+    teacher = g.user.teacher_profile
     if not teacher:
         return jsonify({'error': 'Teacher profile not found'}), 404
     
@@ -82,13 +82,13 @@ def get_teaching_plans():
 
 
 @api_v1.route('/teaching-plans', methods=['POST'])
-@login_required
+@api_login_required
 def create_teaching_plan():
     """创建教学计划"""
-    if current_user.role != 'teacher':
+    if g.user.role != 'teacher':
         return jsonify({'error': 'Only teachers can create teaching plans'}), 403
     
-    teacher = current_user.teacher_profile
+    teacher = g.user.teacher_profile
     if not teacher:
         return jsonify({'error': 'Teacher profile not found'}), 404
     
@@ -148,13 +148,13 @@ def create_teaching_plan():
 
 
 @api_v1.route('/teaching-plans/<int:plan_id>', methods=['PUT'])
-@login_required
+@api_login_required
 def update_teaching_plan(plan_id):
     """更新教学计划"""
-    if current_user.role != 'teacher':
+    if g.user.role != 'teacher':
         return jsonify({'error': 'Only teachers can update teaching plans'}), 403
     
-    teacher = current_user.teacher_profile
+    teacher = g.user.teacher_profile
     if not teacher:
         return jsonify({'error': 'Teacher profile not found'}), 404
     
@@ -199,13 +199,13 @@ def update_teaching_plan(plan_id):
 
 
 @api_v1.route('/teaching-plans/<int:plan_id>', methods=['DELETE'])
-@login_required
+@api_login_required
 def delete_teaching_plan(plan_id):
     """删除教学计划"""
-    if current_user.role != 'teacher':
+    if g.user.role != 'teacher':
         return jsonify({'error': 'Only teachers can delete teaching plans'}), 403
     
-    teacher = current_user.teacher_profile
+    teacher = g.user.teacher_profile
     if not teacher:
         return jsonify({'error': 'Teacher profile not found'}), 404
     
@@ -226,13 +226,13 @@ def delete_teaching_plan(plan_id):
 
 
 @api_v1.route('/teaching-plans/sync-to-students/<int:plan_id>', methods=['POST'])
-@login_required
+@api_login_required
 def sync_plan_to_students(plan_id):
     """一键同步教学计划到学生端"""
-    if current_user.role != 'teacher':
+    if g.user.role != 'teacher':
         return jsonify({'error': 'Only teachers can sync plans'}), 403
     
-    teacher = current_user.teacher_profile
+    teacher = g.user.teacher_profile
     if not teacher:
         return jsonify({'error': 'Teacher profile not found'}), 404
     
@@ -255,13 +255,13 @@ def sync_plan_to_students(plan_id):
 # ==================== 个人任务API ====================
 
 @api_v1.route('/personal-tasks', methods=['GET'])
-@login_required
+@api_login_required
 def get_personal_tasks():
     """获取学生的个人任务列表"""
-    if current_user.role != 'student':
+    if g.user.role != 'student':
         return jsonify({'error': 'Only students can access personal tasks'}), 403
     
-    student = current_user.student_profile
+    student = g.user.student_profile
     if not student:
         return jsonify({'error': 'Student profile not found'}), 404
     
@@ -312,13 +312,13 @@ def get_personal_tasks():
 
 
 @api_v1.route('/personal-tasks', methods=['POST'])
-@login_required
+@api_login_required
 def create_personal_task():
     """创建个人任务"""
-    if current_user.role != 'student':
+    if g.user.role != 'student':
         return jsonify({'error': 'Only students can create personal tasks'}), 403
     
-    student = current_user.student_profile
+    student = g.user.student_profile
     if not student:
         return jsonify({'error': 'Student profile not found'}), 404
     
@@ -367,13 +367,13 @@ def create_personal_task():
 
 
 @api_v1.route('/personal-tasks/<int:task_id>', methods=['PUT'])
-@login_required
+@api_login_required
 def update_personal_task(task_id):
     """更新个人任务"""
-    if current_user.role != 'student':
+    if g.user.role != 'student':
         return jsonify({'error': 'Only students can update personal tasks'}), 403
     
-    student = current_user.student_profile
+    student = g.user.student_profile
     if not student:
         return jsonify({'error': 'Student profile not found'}), 404
     
@@ -425,13 +425,13 @@ def update_personal_task(task_id):
 
 
 @api_v1.route('/personal-tasks/<int:task_id>', methods=['DELETE'])
-@login_required
+@api_login_required
 def delete_personal_task(task_id):
     """删除个人任务"""
-    if current_user.role != 'student':
+    if g.user.role != 'student':
         return jsonify({'error': 'Only students can delete personal tasks'}), 403
     
-    student = current_user.student_profile
+    student = g.user.student_profile
     if not student:
         return jsonify({'error': 'Student profile not found'}), 404
     

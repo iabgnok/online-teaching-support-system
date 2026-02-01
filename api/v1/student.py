@@ -1,5 +1,5 @@
-from flask import jsonify, request, current_app
-from flask_login import current_user
+from flask import jsonify, request, current_app, g
+from .auth import api_login_required
 from functools import wraps
 from models import db, VStudentMyAssignments, Submission, Assignment, generate_next_id
 from werkzeug.utils import secure_filename
@@ -7,24 +7,14 @@ import os
 from datetime import datetime
 from . import api_v1
 
-
-def api_login_required(f):
-    """检查用户是否登录，如果未登录则返回 401"""
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if not current_user.is_authenticated:
-            return jsonify({'error': 'Authentication required'}), 401
-        return f(*args, **kwargs)
-    return decorated_function
-
 @api_v1.route('/student/assignment/<int:assignment_id>', methods=['GET'])
 @api_login_required
 def get_student_assignment_detail(assignment_id):
     """获取学生作业详情（包含提交状态）"""
-    if current_user.role != 'student':
+    if g.user.role != 'student':
         return jsonify({'error': 'Unauthorized'}), 403
     
-    student = current_user.student_profile
+    student = g.user.student_profile
     
     # query view for efficiency and blended data
     record = VStudentMyAssignments.query.filter_by(
@@ -95,10 +85,10 @@ def get_student_assignment_detail(assignment_id):
 @api_login_required
 def submit_assignment():
     """学生提交作业"""
-    if current_user.role != 'student':
+    if g.user.role != 'student':
         return jsonify({'error': 'Unauthorized'}), 403
 
-    student = current_user.student_profile
+    student = g.user.student_profile
     assignment_id = request.form.get('assignment_id')
     content = request.form.get('content')
     file = request.files.get('file')

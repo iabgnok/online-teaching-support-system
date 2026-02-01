@@ -60,13 +60,18 @@ const onSubmit = async () => {
   loading.value = true
   try {
     const res = await api.post('/login', form)
-    const role = res.data.user.role
+    const user = res.data.user
+    const token = res.data.token
     
-    // Store role for global access (e.g. App.vue navigation)
-    localStorage.setItem('user_role', role)
-    // Trigger an event or rely on reactivity if using a store (Simplified: reload or use reactive state in App)
+    // Store user data for global access
+    localStorage.setItem('user_token', token)
+    localStorage.setItem('user_role', user.role)
+    localStorage.setItem('user_id', user.id)
+    localStorage.setItem('user_name', user.real_name || user.username)
+    localStorage.setItem('username', user.username)
+    localStorage.setItem('real_name', user.real_name)
     
-    if (role === 'teacher') {
+    if (user.role === 'teacher') {
       router.push('/teacher/dashboard')
     } else {
       router.push('/')

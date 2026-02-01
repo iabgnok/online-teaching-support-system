@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>清除缓存</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            text-align: center;
+            max-width: 500px;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .info {
+            color: #666;
+            margin-bottom: 30px;
+            line-height: 1.6;
+        }
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background: #5568d3;
+        }
+        .success {
+            color: #28a745;
+            font-weight: bold;
+            margin-top: 20px;
+            display: none;
+        }
+        .storage-info {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+            text-align: left;
+            font-size: 14px;
+            color: #495057;
+        }
+        .storage-info strong {
+            color: #212529;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 清除登录缓存</h1>
+        
+        <div class="info">
+            <p>检测到登录token已过期。</p>
+            <p>点击下方按钮清除旧的登录信息，然后重新登录。</p>
+        </div>
+
+        <div class="storage-info" id="storageInfo">
+            <strong>当前缓存信息：</strong><br>
+            <span id="tokenInfo">检查中...</span>
+        </div>
+
+        <button onclick="clearStorage()">清除缓存并重新登录</button>
+
+        <div class="success" id="successMsg">
+            ✓ 缓存已清除！<br>正在跳转到登录页...
+        </div>
+    </div>
+
+    <script>
+        // 显示当前存储的信息
+        function showStorageInfo() {
+            const token = localStorage.getItem('user_token');
+            const role = localStorage.getItem('user_role');
+            const userId = localStorage.getItem('user_id');
+            const userName = localStorage.getItem('user_name');
+            
+            let info = '';
+            if (token) {
+                info += `Token: ${token.substring(0, 30)}...<br>`;
+                info += `用户ID: ${userId}<br>`;
+                info += `用户名: ${userName}<br>`;
+                info += `角色: ${role}<br>`;
+            } else {
+                info = '没有找到登录信息';
+            }
+            
+            document.getElementById('tokenInfo').innerHTML = info;
+        }
+
+        function clearStorage() {
+            // 清除所有localStorage
+            const keysToRemove = [
+                'user_token',
+                'user_role', 
+                'user_id',
+                'user_name',
+                'username',
+                'real_name'
+            ];
+            
+            keysToRemove.forEach(key => {
+                localStorage.removeItem(key);
+            });
+            
+            // 显示成功消息
+            document.getElementById('successMsg').style.display = 'block';
+            
+            // 2秒后跳转到登录页
+            setTimeout(() => {
+                window.location.href = '/login';
+            }, 2000);
+        }
+
+        // 页面加载时显示存储信息
+        showStorageInfo();
+    </script>
+</body>
+</html>

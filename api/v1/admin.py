@@ -1,8 +1,7 @@
 """管理员API模块 - 用户管理、数据导入、统计查询"""
 
-from flask import Blueprint, jsonify, request, current_app
-from flask_login import login_required, current_user
-from functools import wraps
+from flask import Blueprint, jsonify, request, current_app, g
+from .auth import api_login_required
 from models import (
     db, Users, Admin, Student, Teacher, Department, Course, TeachingClass,
     StudentClass, TeacherClass, Assignment, Submission, Grade, Material,
@@ -15,39 +14,36 @@ import csv
 import io
 from werkzeug.utils import secure_filename
 import os
+from functools import wraps
 
 admin_bp = Blueprint('admin', __name__)
 
 # ==================== 权限装饰器 ====================
 def admin_required(f):
-    """要求管理员角色（临时禁用认证检查）"""
+    """要求管理员角色"""
     @wraps(f)
+    @api_login_required
     def decorated_function(*args, **kwargs):
-        # 临时禁用认证检查
-        # if not current_user.is_authenticated:
-        #     return jsonify({'error': 'Authentication required'}), 401
-        # if current_user.role != 'admin':
-        #     return jsonify({'error': 'Admin access required'}), 403
+        if hasattr(g, 'user') and g.user.role != 'admin':
+            return jsonify({'error': 'Admin access required'}), 403
         return f(*args, **kwargs)
     return decorated_function
 
 def admin_permission_required(min_level):
-    """要求特定权限等级（1=最高，3=最低）（临时禁用认证检查）"""
+    """要求特定权限等级（1=最高，3=最低）"""
     def decorator(f):
         @wraps(f)
+        @api_login_required
         def decorated_function(*args, **kwargs):
-            # 临时禁用认证检查
-            # if not current_user.is_authenticated:
-            #     return jsonify({'error': 'Authentication required'}), 401
-            # if current_user.role != 'admin':
-            #     return jsonify({'error': 'Admin access required'}), 403
-            # 
-            # admin_profile = current_user.admin_profile
-            # if not admin_profile:
-            #     return jsonify({'error': 'Admin profile not found'}), 403
-            # 
-            # if admin_profile.permission_level > min_level:
-            #     return jsonify({'error': f'Permission level {min_level} required'}), 403
+            if not hasattr(g, 'user') or g.user.role != 'admin':
+                return jsonify({'error': 'Admin access required'}), 403
+            
+            admin_profile = Admin.query.filter_by(user_id=g.user.user_id).first()
+            if not admin_profile:
+                return jsonify({'error': 'Admin profile not found'}), 403
+            
+            if admin_profile.permission_level > min_level:
+                return jsonify({'error': f'Permission level {min_level} required'}), 403
             
             return f(*args, **kwargs)
         return decorated_function
