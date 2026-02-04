@@ -774,6 +774,25 @@ export default {
 </script>
 
 <style scoped>
+/* ========== 统一的色彩变量 (方案三 - UI统一) ========== */
+:root {
+  --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  --primary-color: #667eea;
+  --secondary-color: #764ba2;
+  --message-bg-received: #f5f5f7;
+  --message-bg-sent: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  --message-text-received: #333;
+  --message-text-sent: #fff;
+  --system-message-bg: #e3f2fd;
+  --system-message-text: #1976d2;
+  --border-color: #e5e5e5;
+  --divider-color: #efefef;
+  --shadow-light: 0 1px 3px rgba(0, 0, 0, 0.05);
+  --shadow-medium: 0 2px 8px rgba(0, 0, 0, 0.1);
+  --bubble-radius: 12px;
+  --bubble-padding: 10px 14px;
+}
+
 /* 主容器 - 收起时只显示按钮 */
 .collapsible-discussion-panel {
   position: relative;
@@ -783,7 +802,7 @@ export default {
   max-height: calc(100vh - 60px);
   width: 400px;
   background: #fff;
-  border-left: 1px solid #e4e7ed;
+  border-left: 1px solid var(--border-color);
   transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
 }
@@ -809,7 +828,7 @@ export default {
 .collapse-toggle-btn {
   width: 28px;
   height: 56px;
-  border: 1px solid #e4e7ed;
+  border: 1px solid var(--border-color);
   border-right: none;
   background: #fff;
   border-radius: 8px 0 0 8px;
@@ -823,7 +842,7 @@ export default {
 }
 
 .collapsed .collapse-toggle-btn {
-  border-right: 1px solid #e4e7ed;
+  border-right: 1px solid var(--border-color);
   border-left: none;
   border-radius: 0 8px 8px 0;
   box-shadow: 3px 0 10px rgba(0,0,0,0.08);
@@ -831,12 +850,12 @@ export default {
 
 .collapse-toggle-btn:hover {
   background: #ecf5ff;
-  color: #409eff;
-  box-shadow: -3px 0 15px rgba(64,158,255,0.2);
+  color: var(--primary-color);
+  box-shadow: -3px 0 15px rgba(102, 126, 234, 0.2);
 }
 
 .collapsed .collapse-toggle-btn:hover {
-  box-shadow: 3px 0 15px rgba(64,158,255,0.2);
+  box-shadow: 3px 0 15px rgba(102, 126, 234, 0.2);
 }
 
 /* 主内容区域 */
@@ -883,7 +902,7 @@ export default {
 .chat-header {
   padding: 12px 16px;
   background: #fff;
-  border-bottom: 1px solid #e4e7ed;
+  border-bottom: 1px solid var(--border-color);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -937,7 +956,7 @@ export default {
 
 .icon-btn:hover {
   background: #f5f7fa;
-  color: #409eff;
+  color: var(--primary-color);
 }
 
 .icon-btn.switch-btn:hover {
@@ -950,7 +969,7 @@ export default {
   overflow-y: auto;
   padding: 20px;
   padding-bottom: 100px;
-  background: linear-gradient(to bottom, #f0f2f5 0%, #e8eaed 100%);
+  background: #f5f7fa;
   position: relative;
   min-height: 0;
 }
@@ -967,32 +986,56 @@ export default {
   text-decoration: underline;
 }
 
-/* 时间分隔线 */
+/* 时间分隔线 - 统一设计 */
 .time-divider {
   text-align: center;
   margin: 20px 0;
+  position: relative;
+}
+
+.time-divider::before,
+.time-divider::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 40px;
+  height: 1px;
+  background: var(--divider-color);
+}
+
+.time-divider::before {
+  left: 0;
+}
+
+.time-divider::after {
+  right: 0;
 }
 
 .time-divider span {
   display: inline-block;
   padding: 4px 12px;
-  background: rgba(0, 0, 0, 0.1);
+  background: rgba(0, 0, 0, 0.05);
   border-radius: 12px;
   font-size: 12px;
-  color: #666;
+  color: #999;
+  position: relative;
+  z-index: 1;
 }
 
-/* 系统消息 */
+/* 系统消息 - 统一设计 */
 .system-message {
   text-align: center;
   padding: 8px 16px;
-  margin: 8px 0;
+  margin: 12px 0;
   font-size: 13px;
-  color: #909399;
+  background: var(--system-message-bg);
+  color: var(--system-message-text);
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
+  border-radius: 12px;
+  border-left: 3px solid var(--system-message-text);
 }
 
 /* 特殊卡片 */
@@ -1005,13 +1048,13 @@ export default {
 .task-card {
   background: #fff;
   border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-medium);
   overflow: hidden;
 }
 
 .card-header {
   padding: 12px 16px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: var(--primary-gradient);
   color: #fff;
   display: flex;
   align-items: center;
@@ -1077,7 +1120,7 @@ export default {
 
 .progress-fill {
   height: 100%;
-  background: #409eff;
+  background: var(--primary-color);
   transition: width 0.3s;
 }
 
@@ -1117,18 +1160,19 @@ export default {
 
 .card-btn:hover {
   background: #ecf5ff;
-  border-color: #409eff;
-  color: #409eff;
+  border-color: var(--primary-color);
+  color: var(--primary-color);
 }
 
 .card-btn.primary {
-  background: #409eff;
-  border-color: #409eff;
+  background: var(--primary-gradient);
+  border-color: var(--primary-color);
   color: #fff;
 }
 
 .card-btn.primary:hover {
-  background: #66b1ff;
+  opacity: 0.9;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
 }
 
 /* 用户消息 */
@@ -1163,14 +1207,14 @@ export default {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #409eff 0%, #66b1ff 100%);
+  background: var(--primary-gradient);
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: 600;
   font-size: 14px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-light);
 }
 
 .avatar-circle.small {
@@ -1194,25 +1238,25 @@ export default {
 }
 
 .message-bubble {
-  padding: 10px 14px;
-  border-radius: 18px;
+  padding: var(--bubble-padding);
+  border-radius: var(--bubble-radius);
   word-wrap: break-word;
   transition: all 0.2s;
   position: relative;
 }
 
 .message-bubble.received {
-  background: #fff;
-  color: #333;
-  border-radius: 18px 18px 18px 4px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  background: var(--message-bg-received);
+  color: var(--message-text-received);
+  border-radius: 12px 12px 12px 4px;
+  box-shadow: var(--shadow-light);
 }
 
 .message-bubble.sent {
-  background: linear-gradient(135deg, #409eff 0%, #66b1ff 100%);
-  color: white;
-  border-radius: 18px 18px 4px 18px;
-  box-shadow: 0 1px 3px rgba(64, 158, 255, 0.3);
+  background: var(--message-bg-sent);
+  color: var(--message-text-sent);
+  border-radius: 12px 12px 4px 12px;
+  box-shadow: 0 1px 3px rgba(102, 126, 234, 0.2);
 }
 
 .bubble-text {
@@ -1231,11 +1275,11 @@ export default {
 }
 
 .message-bubble.received .bubble-meta {
-  color: rgba(0, 0, 0, 0.4);
+  color: rgba(0, 0, 0, 0.3);
 }
 
 .message-bubble.sent .bubble-meta {
-  color: rgba(255, 255, 255, 0.8);
+  color: rgba(255, 255, 255, 0.7);
   justify-content: flex-end;
 }
 
@@ -1259,10 +1303,10 @@ export default {
 }
 
 .typing-bubble {
-  padding: 10px 14px;
-  background: #fff;
-  border-radius: 18px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  padding: var(--bubble-padding);
+  background: var(--message-bg-received);
+  border-radius: var(--bubble-radius);
+  box-shadow: var(--shadow-light);
 }
 
 .typing-dots {
@@ -1309,7 +1353,7 @@ export default {
 }
 
 .unread-bubble {
-  background: linear-gradient(135deg, #409eff 0%, #66b1ff 100%);
+  background: var(--primary-gradient);
   color: white;
   font-size: 12px;
   font-weight: 600;
@@ -1319,7 +1363,7 @@ export default {
   z-index: 2;
   min-width: 20px;
   text-align: center;
-  box-shadow: 0 2px 6px rgba(64, 158, 255, 0.4);
+  box-shadow: 0 2px 6px rgba(102, 126, 234, 0.4);
   animation: bounceIn 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
 }
 
@@ -1338,7 +1382,7 @@ export default {
 }
 
 .down-button {
-  background: rgba(64, 158, 255, 0.95);
+  background: rgba(102, 126, 234, 0.95);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   width: 46px;
@@ -1348,7 +1392,7 @@ export default {
   justify-content: center;
   align-items: center;
   transition: all 0.2s ease;
-  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.3);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
   z-index: 1;
 }
 
@@ -1358,9 +1402,9 @@ export default {
 }
 
 .scroll-to-bottom:hover .down-button {
-  background: rgba(64, 158, 255, 1);
+  background: rgba(102, 126, 234, 1);
   transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(64, 158, 255, 0.4);
+  box-shadow: 0 6px 16px rgba(102, 126, 234, 0.4);
 }
 
 /* 输入区域 */
@@ -1415,7 +1459,7 @@ export default {
 /* 输入容器包装器 */
 .input-container-wrapper {
   background: #fff;
-  border-top: 1px solid #e4e7ed;
+  border-top: 1px solid var(--border-color);
   padding: 8px 12px 12px;
   flex-shrink: 0;
 }
