@@ -10,6 +10,10 @@ def api_login_required(f):
     """检查用户是否登录，如果未登录则返回 401"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        # 允许OPTIONS请求通过（CORS预检）
+        if request.method == 'OPTIONS':
+            return jsonify({'msg': 'preflight ok'}), 200
+
         # 首先尝试从Authorization头获取token
         token = request.headers.get('Authorization')
         print(f"Debug auth: Authorization header = {token}")

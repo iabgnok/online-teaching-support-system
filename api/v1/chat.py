@@ -1,307 +1,396 @@
 """
+
 即时通讯API端点
+
 提供对话管理和消息收发功能
+
 """
 
+
+
 from flask import jsonify, request, g
+
 from werkzeug.utils import secure_filename
+
 from models import (
+
     db, Conversation, ConversationMember, IMMessage, MessageStatus, 
+
     UserOnlineStatus, Users, TeachingClass, generate_next_id,
-    MessageReaction, PinnedMessage, MentionNotification
+
+    MessageReaction, PinnedMessage, MentionNotification,
+
+    ChatFolder, ChatFolderItem, LiveClass, StudentClass, TeacherClass
+
 )
+
 from . import api_v1
+
 from .auth import api_login_required
+
 from sqlalchemy import or_, and_, func, desc
+
 from datetime import datetime, timedelta
+
 import os
+
 import re
+
 import requests
+
 from bs4 import BeautifulSoup
+
 from urllib.parse import urlparse
+
+
+
 
 
 # ==================== 辅助函数 ====================
 
+
+
 def extract_link_preview(url):
+
     """提取网页链接预览信息"""
+
     try:
+
         # 设置请求头，模拟浏览器
+
         headers = {
+
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+
         }
+
         
+
         # 发送请求，设置超时
+
         response = requests.get(url, headers=headers, timeout=5)
+
         response.raise_for_status()
+
         
+
         # 解析HTML
+
         soup = BeautifulSoup(response.text, 'html.parser')
+
         
+
         # 提取 Open Graph 标签
+
         og_title = soup.find('meta', property='og:title')
+
         og_description = soup.find('meta', property='og:description')
+
         og_image = soup.find('meta', property='og:image')
+
         
+
         # 如果没有 OG 标签，使用普通标签
+
         title = og_title['content'] if og_title else (soup.find('title').text if soup.find('title') else url)
+
         description = og_description['content'] if og_description else ''
+
         image = og_image['content'] if og_image else ''
+
         
+
         # 获取域名
+
         parsed_url = urlparse(url)
+
         domain = parsed_url.netloc
+
         
+
         return {
+
             'url': url,
+
             'title': title[:200],  # 限制长度
+
             'description': description[:500] if description else '',
+
             'image': image,
+
             'domain': domain
+
         }
+
     except Exception as e:
+
         # 如果获取失败，返回基本信息
+
         parsed_url = urlparse(url)
+
         return {
+
             'url': url,
+
             'title': parsed_url.netloc,
+
             'description': '',
+
             'image': '',
+
             'domain': parsed_url.netloc
+
         }
+
+
+
 
 
 # ==================== 对话管理 API ====================
 
+
+
 @api_v1.route('/chat/conversations', methods=['GET'])
+
 @api_login_required
+
 def get_conversations():
+
     """获取用户的所有对话列表"""
+
     user_id = g.user.user_id
+
     
+
     # 查询用户参与的所有对话
+
     memberships = ConversationMember.query.filter_by(
+
         user_id=user_id,
+
         left_at=None  # 只显示未退出的对话
+
     ).all()
+
     
+
     conversations = []
+
     for membership in memberships:
+
         conv = membership.conversation
         
+        # 隐藏讨论组，不在列表中显示（它们只作为频道的评论区存在）
+        if conv.group_subtype == 'discussion':
+            continue
+        
+        # 隐藏课堂讨论区（conversation_subtype='live_class_discussion'）
+        # 课堂讨论区只在课堂内显示，不在外部群组列表中显示
+        if conv.conversation_subtype == 'live_class_discussion':
+            continue
+        
+        # 隐藏所有旧的live_class类型对话（遗留数据兼容）
+        if conv.conversation_type == 'live_class':
+            continue
+        
+        # 隐藏旧版本的ended_live_class类型对话（遗留数据）
+        if conv.conversation_type == 'ended_live_class':
+            continue
+
+        
+
         # 获取最后一条消息
+
         last_message = IMMessage.query.filter_by(
+
             conversation_id=conv.id,
+
             is_deleted=False
+
         ).order_by(desc(IMMessage.created_at)).first()
+
         
+
         # 构建对话信息
+
         conv_data = {
+
             'id': conv.id,
+
             'type': conv.conversation_type,
+
+            'group_subtype': conv.group_subtype,  # 添加群组子类型（频道/讨论组）
+
+            'linked_discussion_id': conv.linked_discussion_id,  # 频道关联的讨论组ID
+
+            'linked_channel_id': conv.linked_channel_id,  # 讨论组关联的频道ID
+
             'title': conv.title,
+
             'avatar': conv.avatar,
+
             'is_pinned': membership.is_pinned,
+
             'is_muted': membership.is_muted,
+
             'unread_count': membership.unread_count,
+
             'updated_at': conv.updated_at.isoformat() if conv.updated_at else None,
+
             'last_message': None,
+
             'class_id': conv.class_id,  # 添加班级ID
+
             'member_count': ConversationMember.query.filter_by(
+
                 conversation_id=conv.id,
+
                 left_at=None
+
             ).count()  # 添加成员数量
+
         }
+
         
+
         # 如果是私聊，获取对方信息
+
         if conv.conversation_type == 'private':
+
             # 找到对方
+
             other_member = ConversationMember.query.filter(
+
                 ConversationMember.conversation_id == conv.id,
+
                 ConversationMember.user_id != user_id
+
             ).first()
+
             
-            if other_member:
+
+            if other_member and other_member.user:
+
                 other_user = other_member.user
+
                 conv_data['title'] = other_user.real_name
+
                 conv_data['other_user'] = {
+
                     'user_id': other_user.user_id,
+
                     'username': other_user.username,
+
                     'real_name': other_user.real_name,
+
                     'role': other_user.role
+
                 }
+
                 
+
                 # 获取在线状态
+
                 online_status = UserOnlineStatus.query.get(other_user.user_id)
+
                 if online_status:
+
                     conv_data['other_user']['is_online'] = online_status.is_online
+
                     conv_data['other_user']['last_seen'] = online_status.last_seen.isoformat()
+
         
+
         # 添加最后一条消息信息
+
         if last_message:
+
             conv_data['last_message'] = {
+
                 'content': last_message.content,
-                'sender_name': last_message.sender.real_name,
+
+                'sender_name': last_message.sender.real_name if last_message.sender else "Unknown",
+
                 'created_at': last_message.created_at.isoformat(),
+
                 'message_type': last_message.message_type
+
             }
+
         
+
         # 添加草稿
+
         if membership.draft_content:
+
             conv_data['draft'] = membership.draft_content
+
         
+
         conversations.append(conv_data)
+
     
-    # 按置顶和更新时间排序
-    conversations.sort(key=lambda x: (not x['is_pinned'], x['updated_at'] or ''), reverse=True)
+
+    # 按置顶和更新时间排序 - 置顶的排在前面
+
+    conversations.sort(key=lambda x: (not x['is_pinned'], -(datetime.fromisoformat(x['updated_at']).timestamp() if x['updated_at'] else 0)))
+
     
+
     return jsonify(conversations)
 
 
-@api_v1.route('/chat/conversations', methods=['POST'])
+@api_v1.route('/chat/class/<int:class_id>/group', methods=['GET'])
 @api_login_required
-def create_conversation():
-    """创建新对话（私聊、群聊、班级群组或课程群组）"""
-    data = request.get_json()
-    conversation_type = data.get('type', 'private')  # private, group, class_group, course_group
-    title = data.get('title')
-    member_ids = data.get('member_ids', [])  # 成员ID列表
-    class_id = data.get('class_id')  # 课程班级ID（班级群组和课程群组需要）
-    
+def get_class_group_info(class_id):
+    """获取班级群聊信息"""
     user_id = g.user.user_id
     
-    # 验证对话类型
-    valid_types = ['private', 'group', 'class_group', 'course_group', 'live_class']
-    if conversation_type not in valid_types:
-        return jsonify({'error': '无效的对话类型'}), 400
-    
-    # 私聊必须指定一个对方
-    if conversation_type == 'private':
-        if not member_ids or len(member_ids) != 1:
-            return jsonify({'error': '私聊需要指定一个对话对象'}), 400
-        
-        other_user_id = member_ids[0]
-        
-        # 检查是否已存在该私聊
-        existing = db.session.query(Conversation).join(ConversationMember).filter(
-            Conversation.conversation_type == 'private',
-            ConversationMember.user_id.in_([user_id, other_user_id])
-        ).group_by(Conversation.id).having(
-            func.count(ConversationMember.id) == 2
-        ).first()
-        
-        if existing:
-            return jsonify({'id': existing.id, 'message': '对话已存在'}), 200
-    
-    # 班级群组和课程群组需要class_id
-    if conversation_type in ['class_group', 'course_group']:
-        if not class_id:
-            return jsonify({'error': '班级群组和课程群组需要指定班级ID'}), 400
-        
-        # 验证用户是否有权限创建该班级的群组
-        teaching_class = TeachingClass.query.get(class_id)
-        if not teaching_class:
-            return jsonify({'error': '班级不存在'}), 404
-        
-        # 检查是否已存在该类型的群组
-        existing_group = Conversation.query.filter_by(
-            conversation_type=conversation_type,
+    try:
+        # 查找班级群聊对话
+        conversation = Conversation.query.filter_by(
             class_id=class_id,
-            is_active=True
+            conversation_type='class_group'
         ).first()
         
-        if existing_group:
-            return jsonify({'id': existing_group.id, 'message': '该班级的群组已存在'}), 200
+        if not conversation:
+            return jsonify({'error': '班级群聊不存在'}), 404
         
-        # 自动设置标题
-        if not title:
-            if conversation_type == 'class_group':
-                title = f"{teaching_class.class_name} - 班级群"
-            else:
-                title = f"{teaching_class.class_name} - 课程群"
-    
-    # 普通群聊需要标题
-    if conversation_type == 'group' and not title:
-        return jsonify({'error': '群聊需要指定名称'}), 400
-    
-    # 创建对话
-    conversation = Conversation(
-        id=generate_next_id(Conversation),
-        conversation_type=conversation_type,
-        title=title,
-        created_by=user_id,
-        class_id=class_id
-    )
-    db.session.add(conversation)
-    
-    # 添加创建者为成员
-    creator_member = ConversationMember(
-        id=generate_next_id(ConversationMember),
-        conversation_id=conversation.id,
-        user_id=user_id,
-        role='owner'
-    )
-    db.session.add(creator_member)
-    
-    # 添加其他成员
-    if conversation_type in ['class_group', 'course_group']:
-        # 班级群组：添加所有学生和教师
-        # 课程群组：只添加教师
-        if conversation_type == 'class_group':
-            # 查找所有班级学生
-            from models import StudentClass
-            students = StudentClass.query.filter_by(class_id=class_id).all()
-            for student in students:
-                if student.student_id != user_id:
-                    member = ConversationMember(
-                        id=generate_next_id(ConversationMember),
-                        conversation_id=conversation.id,
-                        user_id=student.student_id,
-                        role='member'
-                    )
-                    db.session.add(member)
+        # 检查用户是否是该班级的成员
+        membership = ConversationMember.query.filter_by(
+            conversation_id=conversation.id,
+            user_id=user_id,
+            left_at=None
+        ).first()
         
-        # 添加教师（两种群组都需要）
-        from models import TeacherClass
-        teachers = TeacherClass.query.filter_by(class_id=class_id).all()
-        for teacher in teachers:
-            if teacher.teacher_id != user_id:
-                member = ConversationMember(
-                    id=generate_next_id(ConversationMember),
-                    conversation_id=conversation.id,
-                    user_id=teacher.teacher_id,
-                    role='admin'
-                )
-                db.session.add(member)
-    else:
-        # 普通群聊和私聊：根据指定的member_ids添加
-        for member_id in member_ids:
-            if member_id != user_id:
-                member = ConversationMember(
-                    id=generate_next_id(ConversationMember),
-                    conversation_id=conversation.id,
-                    user_id=member_id,
-                    role='member'
-                )
-                db.session.add(member)
-    
-    db.session.commit()
-    
-    return jsonify({
-        'id': conversation.id,
-        'type': conversation.conversation_type,
-        'title': conversation.title,
-        'message': '对话创建成功'
-    }), 201
+        if not membership:
+            return jsonify({'error': '您不是该班级的成员'}), 403
+        
+        # 获取成员数量
+        member_count = ConversationMember.query.filter_by(
+            conversation_id=conversation.id,
+            left_at=None
+        ).count()
+        
+        return jsonify({
+            'conversation_id': conversation.id,
+            'name': conversation.title,
+            'member_count': member_count,
+            'avatar': conversation.avatar,
+            'description': conversation.description
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @api_v1.route('/chat/conversations/<int:conversation_id>', methods=['GET'])
 @api_login_required
-def get_conversation_detail(conversation_id):
-    """获取对话详情"""
+def get_conversation(conversation_id):
+    """获取单个对话信息（包括隐藏的讨论组）"""
     user_id = g.user.user_id
     
-    # 验证用户是否是该对话成员
+    # 检查用户是否是该对话的成员
     membership = ConversationMember.query.filter_by(
         conversation_id=conversation_id,
         user_id=user_id,
@@ -311,1276 +400,3374 @@ def get_conversation_detail(conversation_id):
     if not membership:
         return jsonify({'error': '无权访问该对话'}), 403
     
-    conversation = Conversation.query.get_or_404(conversation_id)
+    conv = membership.conversation
     
-    # 获取所有成员
-    members = []
-    for member in conversation.members.filter_by(left_at=None):
-        user = member.user
-        member_data = {
-            'user_id': user.user_id,
-            'username': user.username,
-            'real_name': user.real_name,
-            'role': member.role,
-            'joined_at': member.joined_at.isoformat()
+    # 获取最后一条消息
+    last_message = IMMessage.query.filter_by(
+        conversation_id=conv.id,
+        is_deleted=False
+    ).order_by(desc(IMMessage.created_at)).first()
+    
+    # 构建对话信息
+    conv_data = {
+        'id': conv.id,
+        'type': conv.conversation_type,
+        'group_subtype': conv.group_subtype,
+        'linked_discussion_id': conv.linked_discussion_id,
+        'linked_channel_id': conv.linked_channel_id,
+        'title': conv.title,
+        'avatar': conv.avatar,
+        'is_pinned': membership.is_pinned,
+        'is_muted': membership.is_muted,
+        'unread_count': membership.unread_count,
+        'updated_at': conv.updated_at.isoformat() if conv.updated_at else None,
+        'last_message': None,
+        'class_id': conv.class_id,
+        'member_count': ConversationMember.query.filter_by(
+            conversation_id=conv.id,
+            left_at=None
+        ).count()
+    }
+    
+    # 如果是私聊，获取对方信息
+    if conv.conversation_type == 'private':
+        other_member = ConversationMember.query.filter(
+            ConversationMember.conversation_id == conv.id,
+            ConversationMember.user_id != user_id
+        ).first()
+        
+        if other_member and other_member.user:
+            other_user = other_member.user
+            conv_data['title'] = other_user.real_name
+            conv_data['other_user'] = {
+                'user_id': other_user.user_id,
+                'username': other_user.username,
+                'real_name': other_user.real_name,
+                'role': other_user.role
+            }
+            
+            # 获取在线状态
+            online_status = UserOnlineStatus.query.get(other_user.user_id)
+            if online_status:
+                conv_data['other_user']['is_online'] = online_status.is_online
+                conv_data['other_user']['last_seen'] = online_status.last_seen.isoformat()
+    
+    # 添加最后一条消息信息
+    if last_message:
+        conv_data['last_message'] = {
+            'content': last_message.content,
+            'sender_name': last_message.sender.real_name if last_message.sender else "Unknown",
+            'created_at': last_message.created_at.isoformat(),
+            'message_type': last_message.message_type
         }
-        
-        # 获取在线状态
-        online_status = UserOnlineStatus.query.get(user.user_id)
-        if online_status:
-            member_data['is_online'] = online_status.is_online
-            member_data['last_seen'] = online_status.last_seen.isoformat()
-        
-        members.append(member_data)
     
+    # 添加草稿
+    if membership.draft_content:
+        conv_data['draft'] = membership.draft_content
+    
+    return jsonify(conv_data)
+
+
+
+
+
+@api_v1.route('/chat/conversations', methods=['POST'])
+
+@api_login_required
+
+def create_conversation():
+
+    """创建新对话（私聊、群聊、班级群组、课程群组或频道）"""
+
+    data = request.get_json()
+
+    conversation_type = data.get('type', 'private')  # private, group, class_group, course_group
+
+    title = data.get('title')
+
+    description = data.get('description')
+
+    member_ids = data.get('member_ids', [])  # 成员ID列表
+
+    class_id = data.get('class_id')  # 课程班级ID（班级群组和课程群组需要）
+
+    group_subtype = data.get('group_subtype', 'normal')  # 'normal', 'channel'
+
+    conversation_subtype = data.get('conversation_subtype')  # 子类型标签：用于标记普通群组下的各种类型
+
+    
+
+    user_id = g.user.user_id
+
+    user = Users.query.get(user_id)
+
+    
+
+    # 权限检查：只有教师可以创建频道
+
+    if group_subtype == 'channel' and user.role != 'teacher':
+
+        return jsonify({'error': '只有教师可以创建频道'}), 403
+
+    
+
+    # 学生只能创建私聊和群聊（不能创建班级群、课程群和频道）
+
+    if user.role == 'student' and conversation_type not in ['private', 'group']:
+
+        return jsonify({'error': '学生只能创建私聊和群聊'}), 403
+
+    
+
+    if user.role == 'student' and group_subtype == 'channel':
+
+        return jsonify({'error': '学生不能创建频道'}), 403
+
+    
+
+    # 验证对话类型
+
+    valid_types = ['private', 'group', 'class_group', 'course_group', 'live_class']
+
+    if conversation_type not in valid_types:
+
+        return jsonify({'error': '无效的对话类型'}), 400
+
+    
+
+    # 私聊必须指定一个对方
+
+    if conversation_type == 'private':
+
+        if not member_ids or len(member_ids) != 1:
+
+            return jsonify({'error': '私聊需要指定一个对话对象'}), 400
+
+        
+
+        other_user_id = member_ids[0]
+
+        
+
+        # 检查是否已存在该私聊
+
+        existing = db.session.query(Conversation).join(ConversationMember).filter(
+
+            Conversation.conversation_type == 'private',
+
+            ConversationMember.user_id.in_([user_id, other_user_id])
+
+        ).group_by(Conversation.id).having(
+
+            func.count(ConversationMember.id) == 2
+
+        ).first()
+
+        
+
+        if existing:
+
+            return jsonify({'id': existing.id, 'message': '对话已存在'}), 200
+
+    
+
+    # 班级群组和课程群组需要class_id
+
+    if conversation_type in ['class_group', 'course_group']:
+
+        if not class_id:
+
+            return jsonify({'error': '班级群组和课程群组需要指定班级ID'}), 400
+
+        
+
+        # 验证用户是否有权限创建该班级的群组
+
+        teaching_class = TeachingClass.query.get(class_id)
+
+        if not teaching_class:
+
+            return jsonify({'error': '班级不存在'}), 404
+
+        
+
+        # 检查是否已存在该类型的群组
+
+        existing_group = Conversation.query.filter_by(
+
+            conversation_type=conversation_type,
+
+            class_id=class_id,
+
+            is_active=True
+
+        ).first()
+
+        
+
+        if existing_group:
+
+            return jsonify({'id': existing_group.id, 'message': '该班级的群组已存在'}), 200
+
+        
+
+        # 自动设置标题
+
+        if not title:
+
+            if conversation_type == 'class_group':
+
+                title = f"{teaching_class.class_name} - 班级群"
+
+            else:
+
+                title = f"{teaching_class.class_name} - 课程群"
+
+    
+
+    # 普通群聊需要标题
+
+    if conversation_type == 'group' and not title:
+
+        return jsonify({'error': '群聊需要指定名称'}), 400
+
+    
+
+    # 创建对话
+
+    conversation = Conversation(
+
+        id=generate_next_id(Conversation),
+
+        conversation_type=conversation_type,
+
+        title=title,
+
+        description=description or None,
+
+        created_by=user_id,
+
+        class_id=class_id,
+
+        group_subtype=group_subtype or 'normal'  # 确保有默认值
+
+    )
+
+    
+
+    db.session.add(conversation)
+
+    
+
+    # 添加创建者为成员
+
+    creator_member = ConversationMember(
+
+        id=generate_next_id(ConversationMember),
+
+        conversation_id=conversation.id,
+
+        user_id=user_id,
+
+        role='owner'
+
+    )
+
+    db.session.add(creator_member)
+
+    
+
+    # 添加其他成员
+
+    if conversation_type in ['class_group', 'course_group']:
+
+        # 班级群组：添加所有学生和教师
+
+        # 课程群组：只添加教师
+
+        if conversation_type == 'class_group':
+
+            # 查找所有班级学生
+
+            from models import StudentClass
+
+            students = StudentClass.query.filter_by(class_id=class_id).all()
+
+            for student in students:
+
+                if student.student_id != user_id:
+
+                    member = ConversationMember(
+
+                        id=generate_next_id(ConversationMember),
+
+                        conversation_id=conversation.id,
+
+                        user_id=student.student_id,
+
+                        role='member'
+
+                    )
+
+                    db.session.add(member)
+
+        
+
+        # 添加教师（两种群组都需要）
+
+        from models import TeacherClass
+
+        teachers = TeacherClass.query.filter_by(class_id=class_id).all()
+
+        for teacher in teachers:
+
+            if teacher.teacher_id != user_id:
+
+                member = ConversationMember(
+
+                    id=generate_next_id(ConversationMember),
+
+                    conversation_id=conversation.id,
+
+                    user_id=teacher.teacher_id,
+
+                    role='admin'
+
+                )
+
+                db.session.add(member)
+
+    else:
+
+        # 普通群聊和私聊：根据指定的member_ids添加
+
+        for member_id in member_ids:
+
+            if member_id != user_id:
+
+                member = ConversationMember(
+
+                    id=generate_next_id(ConversationMember),
+
+                    conversation_id=conversation.id,
+
+                    user_id=member_id,
+
+                    role='member'
+
+                )
+
+                db.session.add(member)
+
+    
+
+    db.session.commit()
+
+    
+
     return jsonify({
+
         'id': conversation.id,
+
         'type': conversation.conversation_type,
+
         'title': conversation.title,
+
+        'message': '对话创建成功'
+
+    }), 201
+
+
+
+
+
+@api_v1.route('/chat/conversations/<int:conversation_id>', methods=['GET'])
+
+@api_login_required
+
+def get_conversation_detail(conversation_id):
+
+    """获取对话详情"""
+
+    user_id = g.user.user_id
+
+    
+
+    # 验证用户是否是该对话成员
+
+    membership = ConversationMember.query.filter_by(
+
+        conversation_id=conversation_id,
+
+        user_id=user_id,
+
+        left_at=None
+
+    ).first()
+
+    
+
+    if not membership:
+
+        return jsonify({'error': '无权访问该对话'}), 403
+
+    
+
+    conversation = Conversation.query.get_or_404(conversation_id)
+
+    
+
+    # 获取所有成员
+
+    members = []
+
+    for member in conversation.members.filter_by(left_at=None):
+
+        user = member.user
+
+        member_data = {
+
+            'user_id': user.user_id,
+
+            'username': user.username,
+
+            'real_name': user.real_name,
+
+            'role': member.role,
+
+            'joined_at': member.joined_at.isoformat()
+
+        }
+
+        
+
+        # 获取在线状态
+
+        online_status = UserOnlineStatus.query.get(user.user_id)
+
+        if online_status:
+
+            member_data['is_online'] = online_status.is_online
+
+            member_data['last_seen'] = online_status.last_seen.isoformat()
+
+        
+
+        members.append(member_data)
+
+    
+
+    return jsonify({
+
+        'id': conversation.id,
+
+        'type': conversation.conversation_type,
+
+        'title': conversation.title,
+
         'avatar': conversation.avatar,
+
         'description': conversation.description,
+
         'created_by': conversation.created_by,
+
         'created_at': conversation.created_at.isoformat(),
+
         'members': members,
+
         'member_count': len(members)
+
     })
 
 
+
+
+
 @api_v1.route('/chat/conversations/<int:conversation_id>', methods=['PUT'])
+
 @api_login_required
+
 def update_conversation(conversation_id):
+
     """更新对话信息（标题、头像等）"""
+
     user_id = g.user.user_id
+
     data = request.get_json()
+
     
+
     # 验证权限（需要是owner或admin）
+
     membership = ConversationMember.query.filter_by(
+
         conversation_id=conversation_id,
+
         user_id=user_id
+
     ).first()
+
     
+
     if not membership or membership.role not in ['owner', 'admin']:
+
         return jsonify({'error': '无权修改对话信息'}), 403
+
     
+
     conversation = Conversation.query.get_or_404(conversation_id)
+
     
+
     # 更新字段
+
     if 'title' in data:
+
         conversation.title = data['title']
+
     if 'avatar' in data:
+
         conversation.avatar = data['avatar']
+
     if 'description' in data:
+
         conversation.description = data['description']
+
     
+
     conversation.updated_at = datetime.now()
+
     db.session.commit()
+
     
+
     return jsonify({'message': '对话信息已更新'})
 
 
+
+
+
 @api_v1.route('/chat/conversations/<int:conversation_id>/members', methods=['POST'])
+
 @api_login_required
+
 def add_conversation_member(conversation_id):
+
     """添加对话成员（仅限群组）"""
+
     user_id = g.user.user_id
+
     data = request.get_json()
+
     new_member_id = data.get('user_id')
+
     
+
     if not new_member_id:
+
         return jsonify({'error': '缺少用户ID'}), 400
+
     
+
     # 验证权限
+
     membership = ConversationMember.query.filter_by(
+
         conversation_id=conversation_id,
+
         user_id=user_id
+
     ).first()
+
     
+
     if not membership or membership.role not in ['owner', 'admin']:
+
         return jsonify({'error': '无权添加成员'}), 403
+
     
+
     conversation = Conversation.query.get_or_404(conversation_id)
+
     
+
     if conversation.conversation_type == 'private':
+
         return jsonify({'error': '私聊不支持添加成员'}), 400
+
     
+
     # 检查是否已是成员
+
     existing = ConversationMember.query.filter_by(
+
         conversation_id=conversation_id,
+
         user_id=new_member_id,
+
         left_at=None
+
     ).first()
+
     
+
     if existing:
+
         return jsonify({'error': '用户已是成员'}), 400
+
     
+
     # 添加新成员
+
     new_member = ConversationMember(
+
         id=generate_next_id(ConversationMember),
+
         conversation_id=conversation_id,
+
         user_id=new_member_id,
+
         role='member'
+
     )
+
     db.session.add(new_member)
+
     
+
     # 创建系统消息
+
     system_msg = IMMessage(
+
         id=generate_next_id(IMMessage),
+
         conversation_id=conversation_id,
+
         sender_id=user_id,
+
         message_type='system',
+
         content=f'{g.user.real_name} 邀请 {new_member.user.real_name} 加入了群组'
+
     )
+
     db.session.add(system_msg)
+
     
+
     db.session.commit()
+
     
+
     return jsonify({'message': '成员已添加'})
 
 
+
+
+
 @api_v1.route('/chat/conversations/<int:conversation_id>/members/<int:member_id>', methods=['DELETE'])
+
 @api_login_required
+
 def remove_conversation_member(conversation_id, member_id):
+
     """移除对话成员"""
+
     user_id = g.user.user_id
+
     
+
     # 验证权限
+
     membership = ConversationMember.query.filter_by(
+
         conversation_id=conversation_id,
+
         user_id=user_id
+
     ).first()
+
     
+
     if not membership or membership.role not in ['owner', 'admin']:
+
         return jsonify({'error': '无权移除成员'}), 403
+
     
+
     # 找到要移除的成员
+
     target_member = ConversationMember.query.filter_by(
+
         conversation_id=conversation_id,
+
         user_id=member_id
+
     ).first()
+
     
+
     if not target_member:
+
         return jsonify({'error': '成员不存在'}), 404
+
     
+
     # 标记为已离开
+
     target_member.left_at = datetime.now()
+
     
+
     # 创建系统消息
+
     system_msg = IMMessage(
+
         id=generate_next_id(IMMessage),
+
         conversation_id=conversation_id,
+
         sender_id=user_id,
+
         message_type='system',
+
         content=f'{target_member.user.real_name} 被移出了群组'
+
     )
+
     db.session.add(system_msg)
+
     
+
     db.session.commit()
+
     
+
     return jsonify({'message': '成员已移除'})
+
+
+
 
 
 # ==================== 消息管理 API ====================
 
+
+
 @api_v1.route('/chat/conversations/<int:conversation_id>/messages', methods=['GET'])
+
 @api_login_required
+
 def get_chat_messages(conversation_id):
-    """获取对话消息列表（分页）"""
+
+    """???????????????"""
+
     user_id = g.user.user_id
+
     
-    # 验证权限
+
+    # ????
+
     membership = ConversationMember.query.filter_by(
+
         conversation_id=conversation_id,
+
         user_id=user_id,
+
         left_at=None
+
     ).first()
+
     
+
     if not membership:
-        return jsonify({'error': '无权访问该对话'}), 403
+
+        return jsonify({'error': '???????'}), 403
+
     
-    # 分页参数
+
+    # ????
+
     page = request.args.get('page', 1, type=int)
+
     per_page = request.args.get('per_page', 50, type=int)
-    before_id = request.args.get('before_id', type=int)  # 加载该消息之前的消息
+
+    before_id = request.args.get('before_id', type=int)  # ??????????
+
+    root_id = request.args.get('root_id', type=int)  # 用于过滤某条消息的评论（讨论模式）
+
     
-    # 构建查询
+
+    # ????
+
+    msg_type = request.args.get('type')  # image, file, etc.
+
+    keyword = request.args.get('q')  # ?????
+
+    
+
+    # ????
+
     query = IMMessage.query.filter_by(
+
         conversation_id=conversation_id,
+
         is_deleted=False
+
     )
     
+    # 如果指定了root_id，只返回该消息的评论（讨论模式）
+    if root_id:
+        query = query.filter_by(root_message_id=root_id)
+    else:
+        # 普通模式：只返回非评论消息（root_message_id为None）
+        query = query.filter(IMMessage.root_message_id.is_(None))
+
+    
+
     if before_id:
+
         query = query.filter(IMMessage.id < before_id)
+
+        
+
+    if msg_type:
+
+        query = query.filter(IMMessage.message_type == msg_type)
+
+        
+
+    if keyword:
+
+        query = query.filter(IMMessage.content.like(f'%{keyword}%'))
+
     
-    # 按时间倒序
+
+    # ?????
+
     messages = query.order_by(desc(IMMessage.created_at)).limit(per_page).all()
+
     
-    # 反转顺序，让最新的在最后
+
+    # ????????????
+
     messages.reverse()
+
     
+
     result = []
+
     for msg in messages:
-        # 检查是否对当前用户隐藏
+
+        # ???????????
+
         if msg.extra_data and 'hidden_for_users' in msg.extra_data:
+
             if user_id in msg.extra_data['hidden_for_users']:
-                continue  # 跳过对该用户隐藏的消息
+
+                continue  # ???????????
+
         
+
         msg_data = {
+
             'id': msg.id,
+
             'sender_id': msg.sender_id,
-            'sender_name': msg.sender.real_name,
-            'sender_avatar': None,  # TODO: 添加头像字段
+
+            'sender_name': msg.sender.real_name if msg.sender else "Unknown",
+
+            'sender_avatar': None,  # TODO: ??????
+
             'content': msg.content,
+
             'message_type': msg.message_type,
+
             'media_url': msg.media_url,
+
             'file_name': msg.file_name,
+
             'file_size': msg.file_size,
+
             'reply_to_id': msg.reply_to_id,
+
             'forward_from_id': msg.forward_from_id,
+
             'is_edited': msg.is_edited,
+
             'created_at': msg.created_at.isoformat(),
+
             'edited_at': msg.edited_at.isoformat() if msg.edited_at else None,
-            'extra_data': msg.extra_data
+
+            'extra_data': msg.extra_data,
+
+            'root_message_id': msg.root_message_id,
+
+            'parent_message_id': msg.parent_message_id,
+
+            'comment_count': msg.comment_count
+
         }
+
+
+
+        # ?????? (??????)
+
+        if msg.sender_id == user_id:
+
+            read_count = MessageStatus.query.filter_by(message_id=msg.id, status='read').count()
+
+            msg_data['read_count'] = read_count
+
         
-        # 如果是回复消息，获取被回复的消息
+
+        # ????????????????
+
         if msg.reply_to_id:
+
             reply_to = IMMessage.query.get(msg.reply_to_id)
+
             if reply_to:
+
                 msg_data['reply_to'] = {
+
                     'id': reply_to.id,
-                    'sender_name': reply_to.sender.real_name,
+
+                    'sender_name': reply_to.sender.real_name if reply_to.sender else "Unknown",
+
                     'content': reply_to.content[:50] + '...' if len(reply_to.content) > 50 else reply_to.content
+
                 }
+
         
-        # 获取消息的反应统计
+
+        # ?????????
+
         reactions = MessageReaction.query.filter_by(message_id=msg.id).all()
+
         if reactions:
+
             reaction_summary = {}
+
             for r in reactions:
+
+
+
                 if r.reaction not in reaction_summary:
+
                     reaction_summary[r.reaction] = {
+
                         'reaction': r.reaction,
+
                         'count': 0,
+
                         'users': [],
+
                         'i_reacted': False
+
                     }
+
                 reaction_summary[r.reaction]['count'] += 1
+
                 reaction_summary[r.reaction]['users'].append(r.user_id)
+
                 if r.user_id == user_id:
+
                     reaction_summary[r.reaction]['i_reacted'] = True
+
             
+
             msg_data['reactions'] = list(reaction_summary.values())
+
         else:
+
             msg_data['reactions'] = []
+
         
+
         # 标记是否被置顶
+
         is_pinned = PinnedMessage.query.filter_by(
+
             conversation_id=conversation_id,
+
             message_id=msg.id
+
         ).first()
+
         msg_data['is_pinned'] = bool(is_pinned)
+
         
+
         result.append(msg_data)
+
     
+
     return jsonify({
+
         'messages': result,
+
         'has_more': len(messages) == per_page
+
     })
 
 
-@api_v1.route('/chat/conversations/<int:conversation_id>/messages', methods=['POST'])
+# 获取单条消息详情
+@api_v1.route('/chat/messages/<int:message_id>', methods=['GET'])
 @api_login_required
+def get_single_message(message_id):
+    """获取单条消息详情"""
+    try:
+        message = IMMessage.query.get(message_id)
+        if not message or message.is_deleted:
+            return jsonify({'error': '消息不存在'}), 404
+        
+        # 检查用户是否有权限访问该消息
+        membership = ConversationMember.query.filter_by(
+            conversation_id=message.conversation_id,
+            user_id=g.user.user_id,
+            left_at=None
+        ).first()
+        
+        if not membership:
+            return jsonify({'error': '无权访问此消息'}), 403
+        
+        # 获取发送者信息
+        sender = Users.query.get(message.sender_id)
+        
+        return jsonify({
+            'id': message.id,
+            'conversation_id': message.conversation_id,
+            'sender_id': message.sender_id,
+            'sender_name': sender.real_name if sender else '未知用户',
+            'content': message.content,
+            'message_type': message.message_type,
+            'created_at': message.created_at.isoformat() if message.created_at else None,
+            'root_message_id': message.root_message_id,
+            'parent_message_id': message.parent_message_id,
+            'comment_count': message.comment_count or 0
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_v1.route('/chat/conversations/<int:conversation_id>/messages', methods=['POST'])
+
+@api_login_required
+
 def send_chat_message(conversation_id):
+
     """发送消息"""
+
     user_id = g.user.user_id
+
     data = request.get_json()
+
     
+
     # 验证权限
+
     membership = ConversationMember.query.filter_by(
+
         conversation_id=conversation_id,
+
         user_id=user_id,
+
         left_at=None
+
     ).first()
+
     
+
     if not membership:
+
         return jsonify({'error': '无权发送消息'}), 403
+
     
-    content = data.get('content', '')
-    message_type = data.get('message_type', 'text')
-    reply_to_id = data.get('reply_to_id')
-    
-    if not content and message_type == 'text':
-        return jsonify({'error': '消息内容不能为空'}), 400
-    
-    # 提取 @ 提及的用户
-    mentioned_users = []
-    if message_type == 'text' and content:
-        # 匹配 @username 或 @用户名 格式
-        mention_pattern = r'@(\S+)'
-        matches = re.findall(mention_pattern, content)
-        
-        if matches:
-            # 查找被提及的用户
-            for username in matches:
-                # 尝试按用户名或真实姓名查找
-                mentioned_user = Users.query.filter(
-                    or_(
-                        Users.username == username,
-                        Users.real_name == username
-                    )
-                ).first()
-                
-                if mentioned_user:
-                    # 检查被提及用户是否是对话成员
-                    is_member = ConversationMember.query.filter_by(
-                        conversation_id=conversation_id,
-                        user_id=mentioned_user.user_id,
-                        left_at=None
-                    ).first()
-                    
-                    if is_member and mentioned_user.user_id != user_id:
-                        mentioned_users.append(mentioned_user.user_id)
-    
-    # 创建消息
-    extra_data = data.get('extra_data') or {}
-    if mentioned_users:
-        extra_data['mentioned_users'] = mentioned_users
-    
-    message = IMMessage(
-        id=generate_next_id(IMMessage),
-        conversation_id=conversation_id,
-        sender_id=user_id,
-        content=content,
-        message_type=message_type,
-        reply_to_id=reply_to_id,
-        media_url=data.get('media_url'),
-        file_name=data.get('file_name'),
-        file_size=data.get('file_size'),
-        extra_data=extra_data if extra_data else None
-    )
-    db.session.add(message)
-    db.session.flush()  # 获取 message.id
-    
-    # 创建 @ 提及通知
-    for mentioned_user_id in mentioned_users:
-        mention_notification = MentionNotification(
-            id=generate_next_id(MentionNotification),
-            message_id=message.id,
-            mentioned_user_id=mentioned_user_id,
-            is_read=False
-        )
-        db.session.add(mention_notification)
-    
-    # 更新对话最后消息时间
+
+    # 获取对话信息
+
     conversation = Conversation.query.get(conversation_id)
-    conversation.last_message_at = datetime.now()
-    conversation.updated_at = datetime.now()
+
+    if not conversation:
+
+        return jsonify({'error': '对话不存在'}), 404
+
     
-    # 更新其他成员的未读计数
-    other_members = ConversationMember.query.filter(
-        ConversationMember.conversation_id == conversation_id,
-        ConversationMember.user_id != user_id,
-        ConversationMember.left_at.is_(None)
-    ).all()
+
+    # 检查频道消息权限：只有教师可以在频道中发送非评论消息
+
+    root_msg_id = data.get('root_message_id')
+
+    # 安全地检查group_subtype，处理None的情况
+
+    if getattr(conversation, 'group_subtype', None) == 'channel' and not root_msg_id:
+
+        # 这是频道主贴，不是评论，检查是否为教师
+
+        user = Users.query.get(user_id)
+
+        if user and user.role != 'teacher':
+
+            return jsonify({'error': '只有教师可以在频道中发布消息'}), 403
+
     
-    for member in other_members:
-        member.unread_count += 1
+
+    content = data.get('content', '')
+
+    message_type = data.get('message_type', 'text')
+
+    reply_to_id = data.get('reply_to_id')
+
+    
+
+    if not content and message_type == 'text':
+
+        return jsonify({'error': '消息内容不能为空'}), 400
+
+    
+
+    # 提取 @ 提及的用户
+
+    mentioned_users = []
+
+    if message_type == 'text' and content:
+
+        # 匹配 @username 或 @用户名 格式
+
+        mention_pattern = r'@(\S+)'
+
+        matches = re.findall(mention_pattern, content)
+
         
-        # 创建消息状态记录
-        status = MessageStatus(
-            id=generate_next_id(MessageStatus),
+
+        if matches:
+
+            # 查找被提及的用户
+
+            for username in matches:
+
+                # 尝试按用户名或真实姓名查找
+
+                mentioned_user = Users.query.filter(
+
+                    or_(
+
+                        Users.username == username,
+
+                        Users.real_name == username
+
+                    )
+
+                ).first()
+
+                
+
+                if mentioned_user:
+
+                    # 检查被提及用户是否是对话成员
+
+                    is_member = ConversationMember.query.filter_by(
+
+                        conversation_id=conversation_id,
+
+                        user_id=mentioned_user.user_id,
+
+                        left_at=None
+
+                    ).first()
+
+                    
+
+                    if is_member and mentioned_user.user_id != user_id:
+
+                        mentioned_users.append(mentioned_user.user_id)
+
+    
+
+    # 创建消息
+
+    extra_data = data.get('extra_data') or {}
+
+    if mentioned_users:
+
+        extra_data['mentioned_users'] = mentioned_users
+
+    
+
+    message = IMMessage(
+
+        id=generate_next_id(IMMessage),
+
+        conversation_id=conversation_id,
+
+        sender_id=user_id,
+
+        content=content,
+
+        message_type=message_type,
+
+        reply_to_id=reply_to_id,
+
+        media_url=data.get('media_url'),
+
+        file_name=data.get('file_name'),
+
+        file_size=data.get('file_size'),
+
+        extra_data=extra_data if extra_data else None
+
+    )
+
+    db.session.add(message)
+
+    db.session.flush()  # 获取 message.id
+
+    
+
+    # 创建 @ 提及通知
+
+    for mentioned_user_id in mentioned_users:
+
+        mention_notification = MentionNotification(
+
+            id=generate_next_id(MentionNotification),
+
             message_id=message.id,
-            user_id=member.user_id,
-            status='sent'
+
+            mentioned_user_id=mentioned_user_id,
+
+            is_read=False
+
         )
+
+        db.session.add(mention_notification)
+
+    
+
+    # 更新对话最后消息时间
+
+    conversation = Conversation.query.get(conversation_id)
+
+    conversation.last_message_at = datetime.now()
+
+    conversation.updated_at = datetime.now()
+
+    
+
+    # 更新其他成员的未读计数
+
+    other_members = ConversationMember.query.filter(
+
+        ConversationMember.conversation_id == conversation_id,
+
+        ConversationMember.user_id != user_id,
+
+        ConversationMember.left_at.is_(None)
+
+    ).all()
+
+    
+
+    for member in other_members:
+
+        member.unread_count += 1
+
+        
+
+        # 创建消息状态记录
+
+        status = MessageStatus(
+
+            id=generate_next_id(MessageStatus),
+
+            message_id=message.id,
+
+            user_id=member.user_id,
+
+            status='sent'
+
+        )
+
         db.session.add(status)
+
     
+
     # 清空发送者的草稿
+
     membership.draft_content = None
+
     membership.draft_updated_at = None
+
     
+
+    # ===== Telegram 式频道消息自动转发 =====
+
+    # 如果是频道消息且没有 root_message_id（即主贴），自动转发到讨论组
+
+    root_msg_id = data.get('root_message_id')
+
+    parent_msg_id = data.get('parent_message_id')
+
+    
+
+    if conversation.group_subtype == 'channel' and not root_msg_id:
+
+        # 检查是否有绑定的讨论组
+
+        if conversation.linked_discussion_id:
+
+            try:
+
+                # 在讨论组创建镜像消息
+
+                mirror_message = IMMessage(
+
+                    id=generate_next_id(IMMessage),
+
+                    conversation_id=conversation.linked_discussion_id,
+
+                    sender_id=user_id,
+
+                    content=content,
+
+                    message_type=message_type,
+
+                    root_message_id=message.id,  # 关键：指向频道消息
+
+                    media_url=data.get('media_url'),
+
+                    file_name=data.get('file_name'),
+
+                    file_size=data.get('file_size'),
+
+                    extra_data={
+
+                        'channel_id': conversation_id,
+
+                        'channel_title': conversation.title,
+
+                        'is_mirror': True
+
+                    }
+
+                )
+
+                db.session.add(mirror_message)
+
+                
+
+                # 更新讨论组的最后消息时间
+
+                discussion = Conversation.query.get(conversation.linked_discussion_id)
+
+                if discussion:
+
+                    discussion.last_message_at = datetime.now()
+
+                    discussion.updated_at = datetime.now()
+
+            except Exception as e:
+
+                # 转发失败不影响主消息发送
+
+                print(f"频道消息转发到讨论组失败: {e}")
+
+    
+
+    # 如果是带 root_message_id 或 parent_message_id 的消息，保存到数据库
+
+    if root_msg_id:
+
+        message.root_message_id = root_msg_id
+
+        # 更新根消息的评论计数
+
+        root_msg = IMMessage.query.get(root_msg_id)
+
+        if root_msg:
+
+            root_msg.comment_count = (root_msg.comment_count or 0) + 1
+
+    
+
+    if parent_msg_id:
+
+        message.parent_message_id = parent_msg_id
+
+    
+
     db.session.commit()
+
     
+
     return jsonify({
+
         'id': message.id,
+
         'created_at': message.created_at.isoformat(),
+
         'message': '消息已发送'
+
     }), 201
 
 
+
+
+
 @api_v1.route('/chat/messages/<int:message_id>', methods=['PUT'])
+
 @api_login_required
+
 def edit_chat_message(message_id):
+
     """编辑消息"""
+
     user_id = g.user.user_id
+
     data = request.get_json()
+
     
+
     message = IMMessage.query.get_or_404(message_id)
+
     
+
     # 只能编辑自己的消息
+
     if message.sender_id != user_id:
+
         return jsonify({'error': '无权编辑该消息'}), 403
+
     
+
     # 只能编辑文本消息
+
     if message.message_type != 'text':
+
         return jsonify({'error': '只能编辑文本消息'}), 400
+
     
+
     new_content = data.get('content', '').strip()
+
     if not new_content:
+
         return jsonify({'error': '消息内容不能为空'}), 400
+
     
+
     message.content = new_content
+
     message.is_edited = True
+
     message.edited_at = datetime.now()
+
     
+
     db.session.commit()
+
     
+
     return jsonify({'message': '消息已编辑'})
 
 
+
+
+
 @api_v1.route('/chat/messages/<int:message_id>', methods=['DELETE'])
+
 @api_login_required
+
 def delete_chat_message(message_id):
+
     """删除消息"""
+
     user_id = g.user.user_id
+
     
+
     message = IMMessage.query.get_or_404(message_id)
+
     
+
     # 只能删除自己的消息
+
     if message.sender_id != user_id:
+
         return jsonify({'error': '无权删除该消息'}), 403
+
     
+
     message.is_deleted = True
+
     message.deleted_at = datetime.now()
+
     message.content = '[消息已删除]'
+
     
+
     db.session.commit()
+
     
+
     return jsonify({'message': '消息已删除'})
 
 
+
+
+
 @api_v1.route('/chat/messages/<int:message_id>/read', methods=['POST'])
+
 @api_login_required
+
 def mark_chat_message_read(message_id):
+
     """标记消息为已读"""
+
     user_id = g.user.user_id
+
     
+
     message = IMMessage.query.get_or_404(message_id)
+
     
+
     # 验证权限
+
     membership = ConversationMember.query.filter_by(
+
         conversation_id=message.conversation_id,
+
         user_id=user_id,
+
         left_at=None
+
     ).first()
+
     
+
     if not membership:
+
         return jsonify({'error': '无权访问该对话'}), 403
+
     
+
     # 更新或创建消息状态
+
     status = MessageStatus.query.filter_by(
+
         message_id=message_id,
+
         user_id=user_id
+
     ).first()
+
     
+
     if not status:
+
         status = MessageStatus(
+
             id=generate_next_id(MessageStatus),
+
             message_id=message_id,
+
             user_id=user_id,
+
             status='read'
+
         )
+
         db.session.add(status)
+
     else:
+
         status.status = 'read'
+
         status.timestamp = datetime.now()
+
     
+
     # 更新成员的最后已读消息ID和时间
+
     membership.last_read_message_id = message_id
+
     membership.last_read_at = datetime.now()
+
     
+
     # 减少未读计数
+
     if membership.unread_count > 0:
+
         membership.unread_count -= 1
+
     
+
     db.session.commit()
+
     
+
     return jsonify({'message': '已标记为已读'})
 
 
+
+
+
 @api_v1.route('/chat/conversations/<int:conversation_id>/read_all', methods=['POST'])
+
 @api_login_required
+
 def mark_conversation_read(conversation_id):
+
     """标记对话所有消息为已读"""
+
     user_id = g.user.user_id
+
     
+
     membership = ConversationMember.query.filter_by(
+
         conversation_id=conversation_id,
+
         user_id=user_id,
+
         left_at=None
+
     ).first()
+
     
+
     if not membership:
+
         return jsonify({'error': '无权访问该对话'}), 403
+
     
+
     # 获取最后一条消息
+
     last_message = IMMessage.query.filter_by(
+
         conversation_id=conversation_id,
+
         is_deleted=False
+
     ).order_by(desc(IMMessage.created_at)).first()
+
     
+
     if last_message:
+
         membership.last_read_message_id = last_message.id
+
         membership.last_read_at = datetime.now()
+
         membership.unread_count = 0
+
         
+
         db.session.commit()
+
     
+
     return jsonify({'message': '所有消息已标记为已读'})
+
+
+
 
 
 # ==================== 搜索 API ====================
 
+
+
 @api_v1.route('/chat/search', methods=['GET'])
+
 @api_login_required
+
 def search_chat_messages():
+
     """全局搜索消息"""
+
     user_id = g.user.user_id
+
     keyword = request.args.get('q', '').strip()
+
     
+
     if not keyword:
+
         return jsonify({'error': '搜索关键词不能为空'}), 400
+
     
+
     # 获取用户参与的所有对话ID
+
     conversation_ids = [
+
         m.conversation_id for m in ConversationMember.query.filter_by(
+
             user_id=user_id,
+
             left_at=None
+
         ).all()
+
     ]
+
     
+
     # 搜索消息
+
     messages = IMMessage.query.filter(
+
         IMMessage.conversation_id.in_(conversation_ids),
+
         IMMessage.is_deleted == False,
+
         IMMessage.content.contains(keyword)
+
     ).order_by(desc(IMMessage.created_at)).limit(50).all()
+
     
+
     result = []
+
     for msg in messages:
+
         result.append({
+
             'id': msg.id,
+
             'conversation_id': msg.conversation_id,
+
             'conversation_title': msg.conversation.title,
-            'sender_name': msg.sender.real_name,
+
+            'sender_name': msg.sender.real_name if msg.sender else "Unknown",
+
             'content': msg.content,
+
             'created_at': msg.created_at.isoformat()
+
         })
+
     
+
     return jsonify(result)
+
+
+
 
 
 # ==================== 个性化设置 API ====================
 
+
+
 @api_v1.route('/chat/conversations/<int:conversation_id>/pin', methods=['POST'])
+
 @api_login_required
+
 def pin_chat_conversation(conversation_id):
+
     """置顶对话"""
+
     user_id = g.user.user_id
+
     
+
     membership = ConversationMember.query.filter_by(
+
         conversation_id=conversation_id,
+
         user_id=user_id
+
     ).first_or_404()
+
     
+
     membership.is_pinned = True
+
     db.session.commit()
+
     
+
     return jsonify({'message': '已置顶'})
 
 
+
+
+
 @api_v1.route('/chat/conversations/<int:conversation_id>/unpin', methods=['POST'])
+
 @api_login_required
+
 def unpin_chat_conversation(conversation_id):
+
     """取消置顶"""
+
     user_id = g.user.user_id
+
     
+
     membership = ConversationMember.query.filter_by(
+
         conversation_id=conversation_id,
+
         user_id=user_id
+
     ).first_or_404()
+
     
+
     membership.is_pinned = False
+
     db.session.commit()
+
     
+
     return jsonify({'message': '已取消置顶'})
 
 
+
+
+
 @api_v1.route('/chat/conversations/<int:conversation_id>/mute', methods=['POST'])
+
 @api_login_required
+
 def mute_chat_conversation(conversation_id):
+
     """静音对话"""
+
     user_id = g.user.user_id
+
     
+
     membership = ConversationMember.query.filter_by(
+
         conversation_id=conversation_id,
+
         user_id=user_id
+
     ).first_or_404()
+
     
+
     membership.is_muted = True
+
     db.session.commit()
+
     
+
     return jsonify({'message': '已静音'})
 
 
+
+
+
 @api_v1.route('/chat/conversations/<int:conversation_id>/unmute', methods=['POST'])
+
 @api_login_required
+
 def unmute_chat_conversation(conversation_id):
+
     """取消静音"""
+
     user_id = g.user.user_id
+
     
+
     membership = ConversationMember.query.filter_by(
+
         conversation_id=conversation_id,
+
         user_id=user_id
+
     ).first_or_404()
+
     
+
     membership.is_muted = False
+
     db.session.commit()
+
     
+
     return jsonify({'message': '已取消静音'})
 
 
+
+
+
 @api_v1.route('/chat/conversations/<int:conversation_id>/draft', methods=['POST'])
+
 @api_login_required
+
 def save_chat_draft(conversation_id):
+
     """保存草稿"""
+
     user_id = g.user.user_id
+
     data = request.get_json()
+
     
+
     membership = ConversationMember.query.filter_by(
+
         conversation_id=conversation_id,
+
         user_id=user_id
+
     ).first_or_404()
+
     
+
     membership.draft_content = data.get('content', '')
+
     membership.draft_updated_at = datetime.now()
+
     
+
     db.session.commit()
+
     
+
     return jsonify({'message': '草稿已保存'})
 
 
+
+
+
 @api_v1.route('/chat/conversations/<int:conversation_id>/leave', methods=['POST'])
+
 @api_login_required
+
 def leave_conversation(conversation_id):
+
     """离开/删除对话"""
+
     user_id = g.user.user_id
+
     
+
     membership = ConversationMember.query.filter_by(
+
         conversation_id=conversation_id,
+
         user_id=user_id,
+
         left_at=None
+
     ).first_or_404()
+
     
+
     # 标记为已离开
+
     membership.left_at = datetime.now()
+
     
+
     # 如果是群组，创建系统消息
+
     conversation = Conversation.query.get(conversation_id)
+
     if conversation.conversation_type != 'private':
+
         system_msg = IMMessage(
+
             id=generate_next_id(IMMessage),
+
             conversation_id=conversation_id,
+
             sender_id=user_id,
+
             content=f'{g.user.real_name} 离开了对话',
+
             message_type='system'
+
         )
+
         db.session.add(system_msg)
+
     
+
     db.session.commit()
+
     
+
     return jsonify({'message': '已离开对话'})
+
+
 
 # ==================== 文件上传 API ====================
 
+
+
 @api_v1.route('/chat/upload', methods=['POST'])
+
 @api_login_required
+
 def upload_chat_file():
+
     """上传聊天文件（图片/文件）"""
+
     if 'file' not in request.files:
+
         return jsonify({'error': '没有文件'}), 400
+
     
+
     file = request.files['file']
+
     
+
     if file.filename == '':
+
         return jsonify({'error': '文件名为空'}), 400
+
     
+
     # 获取文件扩展名
+
     filename = secure_filename(file.filename)
+
     ext = os.path.splitext(filename)[1].lower()
+
     
+
     # 生成唯一文件名
+
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
     unique_filename = f"{timestamp}_{filename}"
+
     
+
     # 确定上传目录
+
     upload_dir = os.path.join('uploads', 'chat')
+
     os.makedirs(upload_dir, exist_ok=True)
+
     
+
     # 保存文件
+
     filepath = os.path.join(upload_dir, unique_filename)
+
     file.save(filepath)
+
     
+
     # 返回文件URL
+
     file_url = f"/uploads/chat/{unique_filename}"
+
     
+
     return jsonify({
+
         'url': file_url,
+
         'filename': filename,
+
         'size': os.path.getsize(filepath)
+
     }), 200
+
+
+
 
 
 # ==================== 消息反应 API ====================
 
-@api_v1.route('/chat/messages/<int:message_id>/reactions', methods=['POST'])
-@api_login_required
-def add_message_reaction(message_id):
-    """添加消息反应（表情回应）"""
-    user_id = g.user.user_id
-    data = request.get_json()
-    reaction = data.get('reaction', '👍')
-    
-    # 验证表情是否在支持列表中
-    allowed_reactions = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🔥', '👏']
-    if reaction not in allowed_reactions:
-        return jsonify({'error': '不支持的表情'}), 400
-    
-    message = IMMessage.query.get_or_404(message_id)
-    
-    # 验证权限（是否是对话成员）
-    membership = ConversationMember.query.filter_by(
-        conversation_id=message.conversation_id,
-        user_id=user_id,
-        left_at=None
-    ).first()
-    
-    if not membership:
-        return jsonify({'error': '无权访问该对话'}), 403
-    
-    # 检查是否已经有反应
-    existing_reaction = MessageReaction.query.filter_by(
-        message_id=message_id,
-        user_id=user_id
-    ).first()
-    
-    if existing_reaction:
-        # 如果是相同的反应，则取消
-        if existing_reaction.reaction == reaction:
-            db.session.delete(existing_reaction)
-            db.session.commit()
-            return jsonify({'message': '已取消反应', 'action': 'removed'})
-        else:
-            # 更新为新的反应
-            existing_reaction.reaction = reaction
-            existing_reaction.created_at = datetime.now()
-            db.session.commit()
-            return jsonify({'message': '已更新反应', 'action': 'updated'})
-    
-    # 创建新反应
-    new_reaction = MessageReaction(
-        id=generate_next_id(MessageReaction),
-        message_id=message_id,
-        user_id=user_id,
-        reaction=reaction
-    )
-    db.session.add(new_reaction)
-    db.session.commit()
-    
-    return jsonify({'message': '已添加反应', 'action': 'added'}), 201
 
 
-@api_v1.route('/chat/messages/<int:message_id>/reactions', methods=['GET'])
-@api_login_required
-def get_message_reactions(message_id):
-    """获取消息的所有反应"""
-    message = IMMessage.query.get_or_404(message_id)
-    
-    # 验证权限
-    membership = ConversationMember.query.filter_by(
-        conversation_id=message.conversation_id,
-        user_id=g.user.user_id,
-        left_at=None
-    ).first()
-    
-    if not membership:
-        return jsonify({'error': '无权访问该对话'}), 403
-    
-    # 统计每种反应的数量和用户
+def get_reactions_summary(message_id):
+    """获取消息的表情统计数据"""
     reactions = MessageReaction.query.filter_by(message_id=message_id).all()
-    
-    # 按反应类型分组
     reaction_summary = {}
+    
     for r in reactions:
         if r.reaction not in reaction_summary:
             reaction_summary[r.reaction] = {
                 'reaction': r.reaction,
                 'count': 0,
-                'users': []
+                'users': [],
+                'user_names': []
             }
         reaction_summary[r.reaction]['count'] += 1
-        reaction_summary[r.reaction]['users'].append({
-            'user_id': r.user_id,
-            'real_name': r.user.real_name
-        })
+        reaction_summary[r.reaction]['users'].append(r.user_id)
+        reaction_summary[r.reaction]['user_names'].append(r.user.real_name)
     
-    return jsonify(list(reaction_summary.values()))
-
-
-@api_v1.route('/chat/messages/<int:message_id>/reactions/<int:user_id>', methods=['DELETE'])
-@api_login_required
-def remove_message_reaction(message_id, user_id):
-    """移除消息反应（只能移除自己的）"""
+    # 添加当前用户是否点过赞的标记
     current_user_id = g.user.user_id
+    for emoji, data in reaction_summary.items():
+        data['i_reacted'] = current_user_id in data['users']
     
-    # 只能删除自己的反应
-    if current_user_id != user_id:
-        return jsonify({'error': '无权删除他人的反应'}), 403
-    
-    reaction = MessageReaction.query.filter_by(
-        message_id=message_id,
-        user_id=user_id
-    ).first_or_404()
-    
-    db.session.delete(reaction)
-    db.session.commit()
-    
-    return jsonify({'message': '已移除反应'})
+    return list(reaction_summary.values())
 
-
-# ==================== 消息置顶 API ====================
-
-@api_v1.route('/chat/conversations/<int:conversation_id>/pinned_messages', methods=['GET'])
+@api_v1.route('/chat/messages/<int:message_id>/reactions', methods=['POST'])
 @api_login_required
-def get_pinned_messages(conversation_id):
-    """获取对话的置顶消息列表"""
-    user_id = g.user.user_id
-    
-    # 验证权限
-    membership = ConversationMember.query.filter_by(
-        conversation_id=conversation_id,
-        user_id=user_id,
-        left_at=None
-    ).first()
-    
-    if not membership:
-        return jsonify({'error': '无权访问该对话'}), 403
-    
-    # 查询置顶消息
-    pinned = PinnedMessage.query.filter_by(
-        conversation_id=conversation_id
-    ).order_by(PinnedMessage.order_index.desc()).all()
-    
-    result = []
-    for p in pinned:
-        msg = p.message
-        result.append({
-            'pin_id': p.id,
-            'message_id': msg.id,
-            'content': msg.content,
-            'sender_name': msg.sender.real_name,
-            'message_type': msg.message_type,
-            'pinned_by': p.pinner.real_name,
-            'pinned_at': p.pinned_at.isoformat(),
-            'created_at': msg.created_at.isoformat()
-        })
-    
-    return jsonify(result)
-
-
-@api_v1.route('/chat/messages/<int:message_id>/pin', methods=['POST'])
-@api_login_required
-def pin_message(message_id):
-    """置顶消息（需要管理员权限）"""
-    user_id = g.user.user_id
-    
-    message = IMMessage.query.get_or_404(message_id)
-    
-    # 验证权限（需要是owner或admin）
-    membership = ConversationMember.query.filter_by(
-        conversation_id=message.conversation_id,
-        user_id=user_id,
-        left_at=None
-    ).first()
-    
-    if not membership or membership.role not in ['owner', 'admin']:
-        return jsonify({'error': '无权置顶消息，需要管理员权限'}), 403
-    
-    # 检查是否已置顶
-    existing = PinnedMessage.query.filter_by(
-        conversation_id=message.conversation_id,
-        message_id=message_id
-    ).first()
-    
-    if existing:
-        return jsonify({'message': '消息已置顶'}), 200
-    
-    # 获取当前最大的 order_index
-    max_order = db.session.query(func.max(PinnedMessage.order_index)).filter_by(
-        conversation_id=message.conversation_id
-    ).scalar() or 0
-    
-    # 创建置顶记录
-    pinned = PinnedMessage(
-        id=generate_next_id(PinnedMessage),
-        conversation_id=message.conversation_id,
-        message_id=message_id,
-        pinned_by=user_id,
-        order_index=max_order + 1
-    )
-    db.session.add(pinned)
-    
-    # 创建系统消息
-    system_msg = IMMessage(
-        id=generate_next_id(IMMessage),
-        conversation_id=message.conversation_id,
-        sender_id=user_id,
-        message_type='system',
-        content=f'{g.user.real_name} 置顶了一条消息'
-    )
-    db.session.add(system_msg)
-    
-    db.session.commit()
-    
-    return jsonify({'message': '已置顶消息'}), 201
-
-
-@api_v1.route('/chat/pinned_messages/<int:pin_id>', methods=['DELETE'])
-@api_login_required
-def unpin_message(pin_id):
-    """取消置顶消息"""
-    user_id = g.user.user_id
-    
-    pinned = PinnedMessage.query.get_or_404(pin_id)
-    
-    # 验证权限
-    membership = ConversationMember.query.filter_by(
-        conversation_id=pinned.conversation_id,
-        user_id=user_id,
-        left_at=None
-    ).first()
-    
-    if not membership or membership.role not in ['owner', 'admin']:
-        return jsonify({'error': '无权取消置顶，需要管理员权限'}), 403
-    
-    db.session.delete(pinned)
-    
-    # 创建系统消息
-    system_msg = IMMessage(
-        id=generate_next_id(IMMessage),
-        conversation_id=pinned.conversation_id,
-        sender_id=user_id,
-        message_type='system',
-        content=f'{g.user.real_name} 取消了消息置顶'
-    )
-    db.session.add(system_msg)
-    
-    db.session.commit()
-    
-    return jsonify({'message': '已取消置顶'})
-
-
-# ==================== 消息转发 API ====================
-
-@api_v1.route('/chat/messages/<int:message_id>/forward', methods=['POST'])
-@api_login_required
-def forward_message(message_id):
-    """转发消息到其他对话"""
-    user_id = g.user.user_id
-    data = request.get_json()
-    target_conversation_ids = data.get('conversation_ids', [])
-    
-    if not target_conversation_ids:
-        return jsonify({'error': '请选择至少一个目标对话'}), 400
-    
-    # 获取原消息
-    original_message = IMMessage.query.get_or_404(message_id)
-    
-    # 验证原消息访问权限
-    source_membership = ConversationMember.query.filter_by(
-        conversation_id=original_message.conversation_id,
-        user_id=user_id,
-        left_at=None
-    ).first()
-    
-    if not source_membership:
-        return jsonify({'error': '无权访问原消息'}), 403
-    
-    forwarded_count = 0
-    
-    for target_id in target_conversation_ids:
-        # 验证目标对话权限
-        target_membership = ConversationMember.query.filter_by(
-            conversation_id=target_id,
+def add_message_reaction(message_id):
+    """添加消息反应（表情回应）"""
+    try:
+        user_id = g.user.user_id
+        data = request.get_json()
+        
+        print(f"[DEBUG] Reaction API - message_id: {message_id}, user_id: {user_id}, data: {data}")
+        
+        if not data:
+            return jsonify({'code': 400, 'error': '请求数据为空'}), 400
+        
+        reaction = data.get('reaction', '').strip()
+        print(f"[DEBUG] Reaction: '{reaction}'")
+        print(f"[DEBUG] Reaction repr: {repr(reaction)}")
+        print(f"[DEBUG] Reaction length: {len(reaction)}")
+        print(f"[DEBUG] Reaction bytes: {reaction.encode('utf-8')}")
+        print(f"[DEBUG] Reaction unicode: {[hex(ord(c)) for c in reaction]}")
+        
+        if not reaction:
+            return jsonify({'code': 400, 'error': '表情不能为空'}), 400
+        
+        # 检测并拒绝损坏的数据（如 ??）
+        if reaction == '??' or all(c == '?' for c in reaction):
+            print(f"[ERROR] Detected corrupted emoji data: {repr(reaction)}")
+            return jsonify({'code': 400, 'error': '表情数据损坏，请重试'}), 400
+        
+        # 验证表情是否在支持列表中（放宽限制，增加更多表情）
+        allowed_reactions = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🔥', '👏', '🎉', '💯', '🤔', '😊']
+        if reaction not in allowed_reactions:
+            print(f"[WARNING] Reaction '{reaction}' not in allowed list, accepting anyway")
+        
+        message = IMMessage.query.get_or_404(message_id)
+        
+        # 验证权限（是否是对话成员）
+        membership = ConversationMember.query.filter_by(
+            conversation_id=message.conversation_id,
             user_id=user_id,
             left_at=None
         ).first()
         
-        if not target_membership:
-            continue  # 跳过无权限的对话
+        if not membership:
+            return jsonify({'code': 403, 'error': '无权访问该对话'}), 403
         
-        # 创建转发消息
-        forwarded_msg = IMMessage(
-            id=generate_next_id(IMMessage),
-            conversation_id=target_id,
-            sender_id=user_id,
-            message_type=original_message.message_type,
-            content=original_message.content,
-            media_url=original_message.media_url,
-            file_name=original_message.file_name,
-            file_size=original_message.file_size,
-            mime_type=original_message.mime_type,
-            forward_from_id=message_id,
-            extra_data={
-                'forwarded_from': {
-                    'sender_name': original_message.sender.real_name,
-                    'conversation_title': original_message.conversation.title,
-                    'original_time': original_message.created_at.isoformat()
-                }
-            }
+        # 检查是否已经有反应
+        existing_reaction = MessageReaction.query.filter_by(
+            message_id=message_id,
+            user_id=user_id
+        ).first()
+        
+        if existing_reaction:
+            # 如果是相同的反应，则取消
+            if existing_reaction.reaction == reaction:
+                db.session.delete(existing_reaction)
+                db.session.commit()
+                print(f"[DEBUG] Removed reaction")
+                reactions_data = get_reactions_summary(message_id)
+                return jsonify({
+                    'code': 200, 
+                    'message': '已取消反应', 
+                    'action': 'removed',
+                    'reactions': reactions_data
+                })
+            else:
+                # 更新为新的反应
+                existing_reaction.reaction = reaction
+                existing_reaction.created_at = datetime.now()
+                db.session.commit()
+                print(f"[DEBUG] Updated reaction")
+                reactions_data = get_reactions_summary(message_id)
+                return jsonify({
+                    'code': 200, 
+                    'message': '已更新反应', 
+                    'action': 'updated',
+                    'reactions': reactions_data
+                })
+        
+        # 创建新反应
+        new_reaction = MessageReaction(
+            id=generate_next_id(MessageReaction),
+            message_id=message_id,
+            user_id=user_id,
+            reaction=reaction
         )
-        db.session.add(forwarded_msg)
+        db.session.add(new_reaction)
+        db.session.commit()
         
-        # 更新目标对话最后消息时间
-        target_conv = Conversation.query.get(target_id)
-        target_conv.last_message_at = datetime.now()
-        target_conv.updated_at = datetime.now()
+        print(f"[DEBUG] Added new reaction")
         
-        # 更新其他成员的未读计数
-        other_members = ConversationMember.query.filter(
-            ConversationMember.conversation_id == target_id,
-            ConversationMember.user_id != user_id,
-            ConversationMember.left_at.is_(None)
-        ).all()
-        
-        for member in other_members:
-            member.unread_count += 1
-        
-        forwarded_count += 1
+        # 返回更新后的表情统计数据
+        reactions_data = get_reactions_summary(message_id)
+        return jsonify({
+            'code': 200, 
+            'message': '已添加反应', 
+            'action': 'added',
+            'reactions': reactions_data
+        }), 201
     
+    except Exception as e:
+        print(f"[ERROR] Exception: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'code': 500, 'error': f'服务器错误: {str(e)}'}), 500
+@api_v1.route('/chat/messages/<int:message_id>/reactions', methods=['GET'])
+
+@api_login_required
+
+def get_message_reactions(message_id):
+
+    """获取消息的所有反应"""
+
+    message = IMMessage.query.get_or_404(message_id)
+
+    
+
+    # 验证权限
+
+    membership = ConversationMember.query.filter_by(
+
+        conversation_id=message.conversation_id,
+
+        user_id=g.user.user_id,
+
+        left_at=None
+
+    ).first()
+
+    
+
+    if not membership:
+
+        return jsonify({'error': '无权访问该对话'}), 403
+
+    
+
+    # 统计每种反应的数量和用户
+
+    reactions = MessageReaction.query.filter_by(message_id=message_id).all()
+
+    
+
+    # 按反应类型分组
+
+    reaction_summary = {}
+
+    for r in reactions:
+
+        if r.reaction not in reaction_summary:
+
+            reaction_summary[r.reaction] = {
+
+                'reaction': r.reaction,
+
+                'count': 0,
+
+                'users': []
+
+            }
+
+        reaction_summary[r.reaction]['count'] += 1
+
+        reaction_summary[r.reaction]['users'].append({
+
+            'user_id': r.user_id,
+
+            'real_name': r.user.real_name
+
+        })
+
+    
+
+    return jsonify(list(reaction_summary.values()))
+
+
+
+
+
+@api_v1.route('/chat/messages/<int:message_id>/reactions/<int:user_id>', methods=['DELETE'])
+
+@api_login_required
+
+def remove_message_reaction(message_id, user_id):
+
+    """移除消息反应（只能移除自己的）"""
+
+    current_user_id = g.user.user_id
+
+    
+
+    # 只能删除自己的反应
+
+    if current_user_id != user_id:
+
+        return jsonify({'error': '无权删除他人的反应'}), 403
+
+    
+
+    reaction = MessageReaction.query.filter_by(
+
+        message_id=message_id,
+
+        user_id=user_id
+
+    ).first_or_404()
+
+    
+
+    db.session.delete(reaction)
+
     db.session.commit()
+
     
+
+    return jsonify({'message': '已移除反应'})
+
+
+
+
+
+# ==================== 消息置顶 API ====================
+
+
+
+@api_v1.route('/chat/conversations/<int:conversation_id>/pinned_messages', methods=['GET'])
+
+@api_login_required
+
+def get_pinned_messages(conversation_id):
+
+    """获取对话的置顶消息列表"""
+
+    user_id = g.user.user_id
+
+    
+
+    # 验证权限
+
+    membership = ConversationMember.query.filter_by(
+
+        conversation_id=conversation_id,
+
+        user_id=user_id,
+
+        left_at=None
+
+    ).first()
+
+    
+
+    if not membership:
+
+        return jsonify({'error': '无权访问该对话'}), 403
+
+    
+
+    # 查询置顶消息
+
+    pinned = PinnedMessage.query.filter_by(
+
+        conversation_id=conversation_id
+
+    ).order_by(PinnedMessage.order_index.desc()).all()
+
+    
+
+    result = []
+
+    for p in pinned:
+
+        msg = p.message
+
+        result.append({
+
+            'pin_id': p.id,
+
+            'message_id': msg.id,
+
+            'content': msg.content,
+
+            'sender_name': msg.sender.real_name if msg.sender else "Unknown",
+
+            'message_type': msg.message_type,
+
+            'pinned_by': p.pinner.real_name if p.pinner else "Unknown",
+
+            'pinned_at': p.pinned_at.isoformat(),
+
+            'created_at': msg.created_at.isoformat()
+
+        })
+
+    
+
+    return jsonify(result)
+
+
+
+
+
+@api_v1.route('/chat/messages/<int:message_id>/pin', methods=['POST'])
+
+@api_login_required
+
+def pin_message(message_id):
+
+    """置顶消息（需要管理员权限）"""
+
+    user_id = g.user.user_id
+
+    
+
+    message = IMMessage.query.get_or_404(message_id)
+
+    
+
+    # 验证权限（需要是owner或admin）
+
+    membership = ConversationMember.query.filter_by(
+
+        conversation_id=message.conversation_id,
+
+        user_id=user_id,
+
+        left_at=None
+
+    ).first()
+
+    
+
+    if not membership or membership.role not in ['owner', 'admin']:
+
+        return jsonify({'error': '无权置顶消息，需要管理员权限'}), 403
+
+    
+
+    # 检查是否已置顶
+
+    existing = PinnedMessage.query.filter_by(
+
+        conversation_id=message.conversation_id,
+
+        message_id=message_id
+
+    ).first()
+
+    
+
+    if existing:
+
+        return jsonify({'message': '消息已置顶'}), 200
+
+    
+
+    # 获取当前最大的 order_index
+
+    max_order = db.session.query(func.max(PinnedMessage.order_index)).filter_by(
+
+        conversation_id=message.conversation_id
+
+    ).scalar() or 0
+
+    
+
+    # 创建置顶记录
+
+    pinned = PinnedMessage(
+
+        id=generate_next_id(PinnedMessage),
+
+        conversation_id=message.conversation_id,
+
+        message_id=message_id,
+
+        pinned_by=user_id,
+
+        order_index=max_order + 1
+
+    )
+
+    db.session.add(pinned)
+
+    
+
+    # 创建系统消息
+
+    system_msg = IMMessage(
+
+        id=generate_next_id(IMMessage),
+
+        conversation_id=message.conversation_id,
+
+        sender_id=user_id,
+
+        message_type='system',
+
+        content=f'{g.user.real_name} 置顶了一条消息'
+
+    )
+
+    db.session.add(system_msg)
+
+    
+
+    db.session.commit()
+
+    
+
+    return jsonify({'message': '已置顶消息'}), 201
+
+
+
+
+
+@api_v1.route('/chat/pinned_messages/<int:pin_id>', methods=['DELETE'])
+
+@api_login_required
+
+def unpin_message(pin_id):
+
+    """取消置顶消息"""
+
+    user_id = g.user.user_id
+
+    
+
+    pinned = PinnedMessage.query.get_or_404(pin_id)
+
+    
+
+    # 验证权限
+
+    membership = ConversationMember.query.filter_by(
+
+        conversation_id=pinned.conversation_id,
+
+        user_id=user_id,
+
+        left_at=None
+
+    ).first()
+
+    
+
+    if not membership or membership.role not in ['owner', 'admin']:
+
+        return jsonify({'error': '无权取消置顶，需要管理员权限'}), 403
+
+    
+
+    db.session.delete(pinned)
+
+    
+
+    # 创建系统消息
+
+    system_msg = IMMessage(
+
+        id=generate_next_id(IMMessage),
+
+        conversation_id=pinned.conversation_id,
+
+        sender_id=user_id,
+
+        message_type='system',
+
+        content=f'{g.user.real_name} 取消了消息置顶'
+
+    )
+
+    db.session.add(system_msg)
+
+    
+
+    db.session.commit()
+
+    
+
+    return jsonify({'message': '已取消置顶'})
+
+
+
+
+
+# ==================== 消息转发 API ====================
+
+
+
+@api_v1.route('/chat/messages/<int:message_id>/forward', methods=['POST'])
+
+@api_login_required
+
+def forward_message(message_id):
+
+    """转发消息到其他对话"""
+
+    user_id = g.user.user_id
+
+    data = request.get_json()
+
+    target_conversation_ids = data.get('conversation_ids', [])
+
+    
+
+    if not target_conversation_ids:
+
+        return jsonify({'error': '请选择至少一个目标对话'}), 400
+
+    
+
+    # 获取原消息
+
+    original_message = IMMessage.query.get_or_404(message_id)
+
+    
+
+    # 验证原消息访问权限
+
+    source_membership = ConversationMember.query.filter_by(
+
+        conversation_id=original_message.conversation_id,
+
+        user_id=user_id,
+
+        left_at=None
+
+    ).first()
+
+    
+
+    if not source_membership:
+
+        return jsonify({'error': '无权访问原消息'}), 403
+
+    
+
+    forwarded_count = 0
+
+    
+
+    for target_id in target_conversation_ids:
+
+        # 验证目标对话权限
+
+        target_membership = ConversationMember.query.filter_by(
+
+            conversation_id=target_id,
+
+            user_id=user_id,
+
+            left_at=None
+
+        ).first()
+
+        
+
+        if not target_membership:
+
+            continue  # 跳过无权限的对话
+
+        
+
+        # 创建转发消息
+
+        forwarded_msg = IMMessage(
+
+            id=generate_next_id(IMMessage),
+
+            conversation_id=target_id,
+
+            sender_id=user_id,
+
+            message_type=original_message.message_type,
+
+            content=original_message.content,
+
+            media_url=original_message.media_url,
+
+            file_name=original_message.file_name,
+
+            file_size=original_message.file_size,
+
+            mime_type=original_message.mime_type,
+
+            forward_from_id=message_id,
+
+            extra_data={
+
+                'forwarded_from': {
+
+                    'sender_name': original_message.sender.real_name if original_message.sender else "Unknown",
+
+                    'conversation_title': original_message.conversation.title,
+
+                    'original_time': original_message.created_at.isoformat()
+
+                }
+
+            }
+
+        )
+
+        db.session.add(forwarded_msg)
+
+        
+
+        # 更新目标对话最后消息时间
+
+        target_conv = Conversation.query.get(target_id)
+
+        target_conv.last_message_at = datetime.now()
+
+        target_conv.updated_at = datetime.now()
+
+        
+
+        # 更新其他成员的未读计数
+
+        other_members = ConversationMember.query.filter(
+
+            ConversationMember.conversation_id == target_id,
+
+            ConversationMember.user_id != user_id,
+
+            ConversationMember.left_at.is_(None)
+
+        ).all()
+
+        
+
+        for member in other_members:
+
+            member.unread_count += 1
+
+        
+
+        forwarded_count += 1
+
+    
+
+    db.session.commit()
+
+    
+
     return jsonify({
+
         'message': f'已转发到 {forwarded_count} 个对话',
+
         'count': forwarded_count
+
     }), 201
+
+
+
 
 
 # ==================== @ 提及功能 API ====================
 
+
+
 @api_v1.route('/chat/conversations/<int:conversation_id>/members/search', methods=['GET'])
+
 @api_login_required
+
 def search_conversation_members(conversation_id):
+
     """搜索对话成员（用于 @ 提及）"""
+
     user_id = g.user.user_id
+
     keyword = request.args.get('q', '').strip()
+
     
+
     # 验证权限
+
     membership = ConversationMember.query.filter_by(
+
         conversation_id=conversation_id,
+
         user_id=user_id,
+
         left_at=None
+
     ).first()
+
     
+
     if not membership:
+
         return jsonify({'error': '无权访问该对话'}), 403
+
     
+
     # 查询成员
+
     query = ConversationMember.query.filter_by(
+
         conversation_id=conversation_id,
+
         left_at=None
+
     ).join(Users)
+
     
+
     if keyword:
+
         query = query.filter(
+
             or_(
+
                 Users.real_name.contains(keyword),
+
                 Users.username.contains(keyword)
+
             )
+
         )
+
     
+
     members = query.limit(10).all()
+
     
+
     result = []
+
     for m in members:
+
         result.append({
+
             'user_id': m.user_id,
+
             'username': m.user.username,
+
             'real_name': m.user.real_name,
+
             'role': m.role
+
         })
+
     
+
     return jsonify(result)
 
 
+
+
+
 @api_v1.route('/chat/mentions', methods=['GET'])
+
 @api_login_required
+
 def get_my_mentions():
+
     """获取我的所有 @ 提及"""
+
     user_id = g.user.user_id
+
     page = request.args.get('page', 1, type=int)
+
     per_page = request.args.get('per_page', 20, type=int)
+
     unread_only = request.args.get('unread_only', 'false').lower() == 'true'
+
     
+
     query = MentionNotification.query.filter_by(mentioned_user_id=user_id)
+
     
+
     if unread_only:
+
         query = query.filter_by(is_read=False)
+
     
+
     query = query.order_by(desc(MentionNotification.created_at))
+
     
+
     mentions = query.paginate(page=page, per_page=per_page, error_out=False)
+
     
+
     result = []
+
     for m in mentions.items:
+
         msg = m.message
+
         result.append({
+
             'mention_id': m.id,
+
             'message_id': msg.id,
+
             'conversation_id': msg.conversation_id,
+
             'conversation_title': msg.conversation.title,
+
             'sender_name': msg.sender.real_name,
+
             'content': msg.content,
+
             'is_read': m.is_read,
+
             'created_at': m.created_at.isoformat()
+
         })
+
     
+
     return jsonify({
+
         'mentions': result,
+
         'total': mentions.total,
+
         'page': page,
+
         'per_page': per_page,
+
         'has_next': mentions.has_next
+
     })
 
 
+
+
+
 @api_v1.route('/chat/mentions/<int:mention_id>/read', methods=['POST'])
+
 @api_login_required
+
 def mark_mention_read(mention_id):
+
     """标记提及为已读"""
+
     user_id = g.user.user_id
+
     
+
     mention = MentionNotification.query.get_or_404(mention_id)
+
     
+
     if mention.mentioned_user_id != user_id:
+
         return jsonify({'error': '无权操作'}), 403
+
     
+
     mention.is_read = True
+
     db.session.commit()
+
     
+
     return jsonify({'message': '已标记为已读'})
+
+
+
 
 
 # ==================== 撤回消息改进 API ====================
 
+
+
 @api_v1.route('/chat/messages/<int:message_id>/unsend', methods=['POST'])
+
 @api_login_required
+
 def unsend_message(message_id):
+
     """撤回消息（对所有人删除，有时间限制）"""
+
     user_id = g.user.user_id
+
     
+
     message = IMMessage.query.get_or_404(message_id)
+
     
+
     # 只能撤回自己的消息
+
     if message.sender_id != user_id:
+
         return jsonify({'error': '无权撤回他人消息'}), 403
+
     
+
     # 检查时间限制（5分钟内）
+
     time_limit = timedelta(minutes=5)
+
     if datetime.now() - message.created_at > time_limit:
+
         return jsonify({'error': '超过撤回时间限制（5分钟）'}), 400
+
     
+
     # 标记为已删除
+
     message.is_deleted = True
+
     message.deleted_at = datetime.now()
+
     original_content = message.content
+
     message.content = '[此消息已撤回]'
+
     
+
     # 创建系统消息通知
+
     system_msg = IMMessage(
+
         id=generate_next_id(IMMessage),
+
         conversation_id=message.conversation_id,
+
         sender_id=user_id,
+
         message_type='system',
+
         content=f'{g.user.real_name} 撤回了一条消息',
+
         extra_data={'unsent_message_id': message_id}
+
     )
+
     db.session.add(system_msg)
+
     
+
     db.session.commit()
+
     
+
     return jsonify({'message': '已撤回消息'})
 
 
+
+
+
 @api_v1.route('/chat/messages/<int:message_id>/delete_for_me', methods=['POST'])
+
 @api_login_required
+
 def delete_message_for_me(message_id):
+
     """仅对我删除消息"""
+
     user_id = g.user.user_id
+
     data = request.get_json() or {}
+
     
+
     message = IMMessage.query.get_or_404(message_id)
+
     
+
     # 验证权限
+
     membership = ConversationMember.query.filter_by(
+
         conversation_id=message.conversation_id,
+
         user_id=user_id,
+
         left_at=None
+
     ).first()
+
     
+
     if not membership:
+
         return jsonify({'error': '无权访问该对话'}), 403
+
     
+
     # 在 extra_data 中记录对该用户隐藏
+
     if not message.extra_data:
+
         message.extra_data = {}
+
     
+
     if 'hidden_for_users' not in message.extra_data:
+
         message.extra_data['hidden_for_users'] = []
+
     
+
     if user_id not in message.extra_data['hidden_for_users']:
+
         message.extra_data['hidden_for_users'].append(user_id)
+
     
+
     db.session.commit()
+
     
+
     return jsonify({'message': '已删除（仅对您可见）'})
+
+
+
 
 
 # ==================== 链接预览 API ====================
 
+
+
 @api_v1.route('/chat/link_preview', methods=['POST'])
+
 @api_login_required
+
 def get_link_preview():
+
     """获取网页链接预览"""
+
     data = request.get_json()
+
     url = data.get('url', '').strip()
+
     
+
     if not url:
+
         return jsonify({'error': 'URL不能为空'}), 400
+
     
+
     # 验证URL格式
+
     url_pattern = re.compile(
+
         r'^https?://'  # http:// 或 https://
+
         r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z]{2,6}\.?|'  # 域名
+
         r'localhost|'  # localhost
+
         r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'  # 或IP
+
         r'(?::\d+)?'  # 可选端口
+
         r'(?:/?|[/?]\S+)$', re.IGNORECASE)
+
     
+
     if not url_pattern.match(url):
+
         return jsonify({'error': '无效的URL格式'}), 400
+
     
+
     # 获取预览信息
+
     preview = extract_link_preview(url)
+
     
+
     return jsonify(preview)
+
+# ==================== 聊天文件夹管理 API ====================
+
+@api_v1.route('/chat/folders', methods=['GET'])
+@api_login_required
+def get_chat_folders():
+    """获取用户的所有聊天文件夹"""
+    folders = ChatFolder.query.filter_by(user_id=g.user.user_id).order_by(ChatFolder.sort_order).all()
+    
+    result = []
+    for f in folders:
+        items = f.items.all()
+        print(f"Folder {f.name} (id={f.id}): {len(items)} items")
+        for item in items:
+            print(f"  - conversation_id: {item.conversation_id}")
+        result.append({
+            'id': f.id,
+            'name': f.name,
+            'icon': f.icon,
+            'filter_type': f.filter_type,
+            'sort_order': f.sort_order,
+            'conversations': [item.conversation_id for item in items] if f.filter_type == 'custom' else []
+        })
+    
+    print(f"Returning {len(result)} folders")
+    return jsonify({'code': 200, 'message': 'Success', 'data': result})
+
+@api_v1.route('/chat/folders', methods=['POST'])
+@api_login_required
+def create_chat_folder():
+    """创建聊天文件夹"""
+    data = request.get_json()
+    name = data.get('name')
+    if not name:
+        return jsonify({'code': 400, 'message': 'Folder name is required'}), 400
+        
+    folder = ChatFolder(
+        id=generate_next_id(ChatFolder),
+        user_id=g.user.user_id,
+        name=name,
+        icon=data.get('icon'),
+        filter_type=data.get('filter_type', 'custom'),
+        sort_order=data.get('sort_order', 0)
+    )
+    
+    db.session.add(folder)
+    db.session.commit()
+    
+    return jsonify({'code': 200, 'message': 'Folder created', 'data': {'id': folder.id}})
+
+@api_v1.route('/chat/folders/<int:folder_id>', methods=['PUT'])
+@api_login_required
+def update_chat_folder(folder_id):
+    """更新聊天文件夹"""
+    folder = ChatFolder.query.filter_by(id=folder_id, user_id=g.user.user_id).first()
+    if not folder:
+        return jsonify({'code': 404, 'message': 'Folder not found'}), 404
+        
+    data = request.get_json()
+    if 'name' in data:
+        folder.name = data['name']
+    if 'icon' in data:
+        folder.icon = data['icon']
+    if 'sort_order' in data:
+        folder.sort_order = data['sort_order']
+        
+    db.session.commit()
+    return jsonify({'code': 200, 'message': 'Folder updated'})
+
+@api_v1.route('/chat/folders/<int:folder_id>', methods=['DELETE'])
+@api_login_required
+def delete_chat_folder(folder_id):
+    """删除聊天文件夹"""
+    folder = ChatFolder.query.filter_by(id=folder_id, user_id=g.user.user_id).first()
+    if not folder:
+        return jsonify({'code': 404, 'message': 'Folder not found'}), 404
+        
+    db.session.delete(folder)
+    db.session.commit()
+    return jsonify({'code': 200, 'message': 'Folder deleted'})
+
+@api_v1.route('/chat/folders/<int:folder_id>/items', methods=['POST'])
+@api_login_required
+def add_folder_item(folder_id):
+    """添加会话到文件夹"""
+    print(f"Adding item to folder {folder_id}")
+    folder = ChatFolder.query.filter_by(id=folder_id, user_id=g.user.user_id).first()
+    if not folder:
+        print(f"Folder {folder_id} not found for user {g.user.user_id}")
+        return jsonify({'code': 404, 'message': 'Folder not found'}), 404
+    
+    if folder.filter_type != 'custom':
+        print(f"Folder {folder_id} is not custom type: {folder.filter_type}")
+        return jsonify({'code': 400, 'message': 'Only custom folders can add items'}), 400
+        
+    data = request.get_json()
+    conversation_id = data.get('conversation_id')
+    print(f"Conversation ID: {conversation_id}")
+    
+    if not conversation_id:
+        return jsonify({'code': 400, 'message': 'conversation_id required'}), 400
+        
+    # Check if exists
+    exists = ChatFolderItem.query.filter_by(folder_id=folder_id, conversation_id=conversation_id).first()
+    if exists:
+        print(f"Item already exists: folder={folder_id}, conversation={conversation_id}")
+        return jsonify({'code': 200, 'message': 'Already in folder'})
+        
+    item = ChatFolderItem(
+        id=generate_next_id(ChatFolderItem),
+        folder_id=folder_id,
+        conversation_id=conversation_id
+    )
+    db.session.add(item)
+    db.session.commit()
+    print(f"Successfully added conversation {conversation_id} to folder {folder_id}")
+    return jsonify({'code': 200, 'message': 'Added to folder'})
+
+@api_v1.route('/chat/folders/<int:folder_id>/items/<int:conversation_id>', methods=['DELETE'])
+@api_login_required
+def remove_folder_item(folder_id, conversation_id):
+    """从文件夹移除会话"""
+    folder = ChatFolder.query.filter_by(id=folder_id, user_id=g.user.user_id).first()
+    if not folder:
+        return jsonify({'code': 404, 'message': 'Folder not found'}), 404
+        
+    item = ChatFolderItem.query.filter_by(folder_id=folder_id, conversation_id=conversation_id).first()
+    if item:
+        db.session.delete(item)
+        db.session.commit()
+        
+    return jsonify({'code': 200, 'message': 'Removed from folder'})
+
+# ==================== 直播课堂状态 API ====================
+
+@api_v1.route('/chat/live_status', methods=['GET'])
+@api_login_required
+def get_live_status():
+    """获取用户相关课程的正在直播状态"""
+    user_id = g.user.user_id
+    role = g.user.role
+    
+    active_lives = []
+    
+    if role == 'teacher':
+        # 老师看到自己正在进行的直播（status='active'）
+        lives = LiveClass.query.filter(
+            LiveClass.teacher_id == user_id,
+            LiveClass.status == 'active'
+        ).all()
+        for live in lives:
+            active_lives.append(live)
+            
+    elif role == 'student':
+        # 学生看到自己所在班级的直播（status='active'）
+        # 1. 找出学生所在的 Class ID
+        student_profile = g.user.student_profile
+        if student_profile:
+            student_classes = StudentClass.query.filter_by(student_id=student_profile.student_id).all()
+            class_ids = [sc.class_id for sc in student_classes]
+            
+            if class_ids:
+                lives = LiveClass.query.filter(
+                    LiveClass.class_id.in_(class_ids),
+                    LiveClass.status == 'active'
+                ).all()
+                for live in lives:
+                    active_lives.append(live)
+    
+    # 构建返回数据
+    result = []
+    for live in active_lives:
+        teacher_name = "Unknown Teacher"
+        if live.teacher:
+            teacher_name = live.teacher.real_name
+        
+        class_name = "Unknown Class"
+        if live.teaching_class:
+            class_name = live.teaching_class.class_name
+            
+        result.append({
+            'live_id': live.id,
+            'lesson_id': live.lesson_id,
+            'title': live.title,
+            'teacher_name': teacher_name,
+            'participants_count': live.participants_count,
+            'class_name': class_name,
+            'start_time': live.start_time.isoformat() if live.start_time else None
+        })
+        
+    return jsonify({'code': 200, 'data': result})

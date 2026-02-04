@@ -1020,6 +1020,12 @@ class Conversation(db.Model):
     avatar = db.Column(db.String(500))  # 群组头像URL
     description = db.Column(db.Text)  # 群组描述
     
+    # Telegram 式群组功能
+    group_subtype = db.Column(db.String(20), nullable=False, default='normal', index=True)  # 'normal', 'channel', 'discussion'
+    conversation_subtype = db.Column(db.String(50), nullable=True, index=True)  # 对话子类型标签，如 'live_class_discussion'（课堂讨论区，只能由线上授课功能创建）
+    linked_discussion_id = db.Column(db.BigInteger, db.ForeignKey('Conversation.id'), nullable=True)  # 频道绑定的讨论组ID
+    linked_channel_id = db.Column(db.BigInteger, db.ForeignKey('Conversation.id'), nullable=True)  # 讨论组关联的频道ID
+    
     # 关联信息
     created_by = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'), nullable=False)
     class_id = db.Column(db.BigInteger, db.ForeignKey('TeachingClass.class_id'), nullable=True)  # 课程班级关联
@@ -1081,6 +1087,42 @@ class ConversationMember(db.Model):
     )
 
 
+class ChatFolder(db.Model):
+    """聊天文件夹 - 用户自定义分组"""
+    __tablename__ = 'ChatFolder'
+
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
+    user_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'), nullable=False, index=True)
+    name = db.Column(db.String(50), nullable=False)
+    icon = db.Column(db.String(50))  # 图标标识
+    filter_type = db.Column(db.String(20), default='custom')  # 'all', 'unread', 'private', 'group', 'class', 'custom'
+    sort_order = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime(timezone=True), default=func.now())
+    
+    # 关系
+    user = db.relationship('Users', backref='chat_folders')
+    items = db.relationship('ChatFolderItem', backref='folder', lazy='dynamic', cascade='all, delete-orphan')
+
+
+class ChatFolderItem(db.Model):
+    """聊天文件夹成员"""
+    __tablename__ = 'ChatFolderItem'
+
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
+    folder_id = db.Column(db.BigInteger, db.ForeignKey('ChatFolder.id'), nullable=False, index=True)
+    conversation_id = db.Column(db.BigInteger, db.ForeignKey('Conversation.id'), nullable=False)
+    sort_order = db.Column(db.Integer, default=0)
+    added_at = db.Column(db.DateTime(timezone=True), default=func.now())
+    
+    # 关系
+    conversation = db.relationship('Conversation')
+    
+    # 唯一约束
+    __table_args__ = (
+        db.UniqueConstraint('folder_id', 'conversation_id', name='uq_chat_folder_item'),
+    )
+
+
 class IMMessage(db.Model):
     """即时通讯消息表 - 统一的消息模型"""
     __tablename__ = 'IMMessage'
@@ -1089,9 +1131,9 @@ class IMMessage(db.Model):
     conversation_id = db.Column(db.BigInteger, db.ForeignKey('Conversation.id'), nullable=False, index=True)
     sender_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'), nullable=False)
     
-    # 消息内容
+    # 消息内容（使用 UnicodeText 以支持 Emoji 等 Unicode 字符）
     message_type = db.Column(db.String(20), default='text', index=True)  # 'text', 'image', 'file', 'voice', 'video', 'system', 'emoji'
-    content = db.Column(db.Text)  # 文本内容
+    content = db.Column(db.UnicodeText)  # 文本内容 - 支持完整 Unicode（包括 Emoji）
     
     # 媒体文件
     media_url = db.Column(db.String(500))  # 媒体文件URL
@@ -1100,8 +1142,13 @@ class IMMessage(db.Model):
     mime_type = db.Column(db.String(100))  # MIME类型
     
     # 引用和回复
-    reply_to_id = db.Column(db.BigInteger, db.ForeignKey('IMMessage.id'))  # 回复的消息ID
+    reply_to_id = db.Column(db.BigInteger, db.ForeignKey('IMMessage.id'))  # 回复的消息ID（已有字段，用于兼容）
     forward_from_id = db.Column(db.BigInteger, db.ForeignKey('IMMessage.id'))  # 转发来源消息ID
+    
+    # Telegram 式群组功能
+    root_message_id = db.Column(db.BigInteger, db.ForeignKey('IMMessage.id'), nullable=True, index=True)  # 频道讨论：指向频道消息ID
+    parent_message_id = db.Column(db.BigInteger, db.ForeignKey('IMMessage.id'), nullable=True, index=True)  # 普通群引用回复：指向父消息ID
+    comment_count = db.Column(db.Integer, default=0)  # 评论数量（冗余字段，提升性能）
     
     # 扩展元数据（JSON格式）
     extra_data = db.Column(db.JSON)  # 如：提及的用户列表、链接预览、位置信息等
@@ -1120,6 +1167,8 @@ class IMMessage(db.Model):
     sender = db.relationship('Users', foreign_keys=[sender_id], backref='im_messages')
     reply_to = db.relationship('IMMessage', remote_side=[id], foreign_keys=[reply_to_id], backref='replies')
     forward_from = db.relationship('IMMessage', remote_side=[id], foreign_keys=[forward_from_id], backref='forwards')
+    root_message = db.relationship('IMMessage', remote_side=[id], foreign_keys=[root_message_id], backref='comments')
+    parent_message = db.relationship('IMMessage', remote_side=[id], foreign_keys=[parent_message_id], backref='thread_replies')
     status_records = db.relationship('MessageStatus', backref='message', lazy='dynamic', cascade='all, delete-orphan')
 
 
@@ -1166,7 +1215,7 @@ class MessageReaction(db.Model):
     id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
     message_id = db.Column(db.BigInteger, db.ForeignKey('IMMessage.id'), nullable=False, index=True)
     user_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'), nullable=False, index=True)
-    reaction = db.Column(db.String(10), nullable=False)  # emoji: '👍', '❤️', '😂', '😮', '😢', '🙏'
+    reaction = db.Column(db.Unicode(20), nullable=False)  # 使用Unicode支持emoji: '👍', '❤️', '😂', '😮', '😢', '🙏'
     created_at = db.Column(db.DateTime(timezone=True), default=func.now())
     
     # 关系
@@ -1220,4 +1269,108 @@ class MentionNotification(db.Model):
     # 索引
     __table_args__ = (
         db.Index('idx_user_unread_mentions', 'mentioned_user_id', 'is_read'),
+    )
+
+
+class ConversationFolder(db.Model):
+    """对话分组文件夹表 - 类似 Telegram 的 Folders"""
+    __tablename__ = 'ConversationFolder'
+    
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
+    user_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'), nullable=False, index=True)
+    name = db.Column(db.String(50), nullable=False)  # '正在上课', '未读作业', '班级群'
+    icon = db.Column(db.String(50))  # emoji 图标
+    color = db.Column(db.String(20))  # 颜色标识
+    order_index = db.Column(db.Integer, default=0)  # 排序
+    is_system = db.Column(db.Boolean, default=False)  # 是否为系统预设分组
+    created_at = db.Column(db.DateTime(timezone=True), default=func.now())
+    
+    # 关系
+    user = db.relationship('Users', backref='conversation_folders')
+    
+    __table_args__ = (
+        db.Index('idx_user_folder', 'user_id', 'order_index'),
+    )
+
+
+class ConversationFolderItem(db.Model):
+    """对话分组成员表"""
+    __tablename__ = 'ConversationFolderItem'
+    
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
+    folder_id = db.Column(db.BigInteger, db.ForeignKey('ConversationFolder.id'), nullable=False, index=True)
+    conversation_id = db.Column(db.BigInteger, db.ForeignKey('Conversation.id'), nullable=False, index=True)
+    added_at = db.Column(db.DateTime(timezone=True), default=func.now())
+    
+    # 关系
+    folder = db.relationship('ConversationFolder', backref='items')
+    conversation = db.relationship('Conversation', backref='folder_items')
+    
+    __table_args__ = (
+        db.UniqueConstraint('folder_id', 'conversation_id', name='uq_folder_conversation'),
+    )
+
+
+class RaiseHandRecord(db.Model):
+    """举手记录表"""
+    __tablename__ = 'RaiseHandRecord'
+    
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
+    live_class_id = db.Column(db.BigInteger, db.ForeignKey('LiveClass.id'), nullable=False, index=True)
+    user_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'), nullable=False, index=True)
+    raised_at = db.Column(db.DateTime(timezone=True), default=func.now())
+    handled_at = db.Column(db.DateTime(timezone=True))  # 老师处理的时间
+    handled_by = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'))  # 哪位老师处理的
+    status = db.Column(db.String(20), default='pending')  # 'pending', 'handled', 'cancelled'
+    question = db.Column(db.Text)  # 学生的问题（可选）
+    
+    # 关系
+    live_class = db.relationship('LiveClass', backref='raise_hand_records')
+    user = db.relationship('Users', foreign_keys=[user_id], backref='raise_hands')
+    handler = db.relationship('Users', foreign_keys=[handled_by], backref='handled_raise_hands')
+    
+    __table_args__ = (
+        db.Index('idx_live_pending_hands', 'live_class_id', 'status'),
+    )
+
+
+class QuickCommand(db.Model):
+    """快捷指令表 - 支持 /call, /quiz 等命令"""
+    __tablename__ = 'QuickCommand'
+    
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
+    live_class_id = db.Column(db.BigInteger, db.ForeignKey('LiveClass.id'), nullable=False, index=True)
+    teacher_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'), nullable=False)
+    command_type = db.Column(db.String(20), nullable=False)  # 'attendance', 'quiz', 'poll'
+    title = db.Column(db.String(200))  # 命令标题
+    config = db.Column(db.Text)  # JSON格式的配置
+    status = db.Column(db.String(20), default='active')  # 'active', 'completed', 'cancelled'
+    created_at = db.Column(db.DateTime(timezone=True), default=func.now())
+    completed_at = db.Column(db.DateTime(timezone=True))
+    
+    # 关系
+    live_class = db.relationship('LiveClass', backref='quick_commands')
+    teacher = db.relationship('Users', backref='issued_commands')
+
+
+class MessageAttachment(db.Model):
+    """消息附件表 - 支持按类型筛选"""
+    __tablename__ = 'MessageAttachment'
+    
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
+    message_id = db.Column(db.BigInteger, db.ForeignKey('IMMessage.id'), nullable=False, index=True)
+    attachment_type = db.Column(db.String(20), nullable=False, index=True)  # 'image', 'document', 'video', 'audio', 'link'
+    file_name = db.Column(db.String(200))
+    file_url = db.Column(db.String(500), nullable=False)
+    file_size = db.Column(db.BigInteger)  # 文件大小（字节）
+    mime_type = db.Column(db.String(100))
+    thumbnail_url = db.Column(db.String(500))  # 缩略图
+    extra_data = db.Column(db.Text)  # JSON格式的额外信息
+    created_at = db.Column(db.DateTime(timezone=True), default=func.now())
+    
+    # 关系
+    message = db.relationship('IMMessage', backref='attachments')
+    
+    __table_args__ = (
+        db.Index('idx_message_attachment_type', 'message_id', 'attachment_type'),
     )

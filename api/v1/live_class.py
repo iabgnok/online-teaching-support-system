@@ -112,11 +112,13 @@ def start_live_class():
     db.session.add(live_class)
     db.session.flush()  # 获取 live_class.id
     
-    # 创建对应的聊天对话（live_class类型）
+    # 创建对应的聊天对话（group类型，带live_class_discussion子类型标签）
     conversation = Conversation(
         id=generate_next_id(Conversation),
-        conversation_type='live_class',
-        title=f"📚 {title}",
+        conversation_type='group',  # 改为普通群组类型
+        group_subtype='normal',
+        conversation_subtype='live_class_discussion',  # 特殊标签：课堂讨论区
+        title=f"📚 {title} - 课堂讨论",
         created_by=g.user.user_id,
         class_id=class_id,
         live_class_id=live_class.id,
@@ -158,7 +160,7 @@ def start_live_class():
             conversation_id=conversation_id,
             sender_id=g.user.user_id,
             message_type='live_class_entry',
-            content=f'{{"lesson_id": "{lesson_id}", "title": "{title}", "description": "{description}", "duration": {duration}}}',
+            content=f'{{"lesson_id": "{lesson_id}", "title": "{title}", "description": "{description}", "duration": {duration}, "status": "active"}}',
             created_at=datetime.now()
         )
         db.session.add(class_message)
@@ -182,6 +184,33 @@ def start_live_class():
         'live_class_id': live_class.id,
         'conversation_id': conversation.id,  # 返回对话ID
         'message': 'Live class started successfully'
+    })
+
+@live_class_bp.route('/<lesson_id>/check', methods=['GET'])
+@api_login_required
+def check_live_class(lesson_id):
+    """验证加入课堂权限"""
+    live_class = LiveClass.query.filter_by(lesson_id=lesson_id).first()
+    
+    if not live_class:
+        return jsonify({'error': 'Live class not found'}), 404
+    
+    if live_class.status == 'ended':
+        return jsonify({'error': 'Live class has ended', 'status': 'ended'}), 403
+    
+    # 检查用户是否属于该班级
+    has_permission = check_class_permission(
+        g.user, 
+        live_class.class_id
+    )
+    
+    if not has_permission:
+        return jsonify({'error': 'No permission to join this class'}), 403
+    
+    return jsonify({
+        'status': live_class.status,
+        'title': live_class.title,
+        'start_time': live_class.start_time.isoformat()
     })
 
 @live_class_bp.route('/<lesson_id>/join', methods=['GET'])
@@ -260,6 +289,24 @@ def end_live_class(lesson_id):
     live_class.end_time = datetime.now()
     live_class.status = 'ended'
     
+    # 更新课堂入口消息的状态为 ended
+    # 查找所有包含此课堂 lesson_id 的入口消息
+    import json
+    from extensions import socketio
+    
+    updated_conversations = set()  # 记录需要通知的对话
+    all_entry_messages = IMMessage.query.filter_by(message_type='live_class_entry').all()
+    for msg in all_entry_messages:
+        try:
+            content = json.loads(msg.content)
+            if content.get('lesson_id') == lesson_id:
+                # 更新状态为 ended
+                content['status'] = 'ended'
+                msg.content = json.dumps(content, ensure_ascii=False)
+                updated_conversations.add(msg.conversation_id)
+        except:
+            pass
+    
     # 删除临时创建的课堂对话及相关数据
     conversation = Conversation.query.filter_by(live_class_id=live_class.id).first()
     if conversation:
@@ -274,8 +321,16 @@ def end_live_class(lesson_id):
     
     db.session.commit()
 
-    from extensions import socketio
+    # 通知课堂内的用户课堂已结束
     socketio.emit('class_ended', {'message': 'Class has ended'}, room=lesson_id)
+    
+    # 通知相关对话中的用户刷新消息（课堂入口状态已更新）
+    for conv_id in updated_conversations:
+        socketio.emit('chat:message_updated', {
+            'conversation_id': conv_id,
+            'lesson_id': lesson_id,
+            'status': 'ended'
+        }, room=f'conversation_{conv_id}')
     
     # 生成课堂笔记
     drawings = DrawingData.query.filter_by(live_class_id=live_class.id).order_by(DrawingData.timestamp).all()
@@ -405,19 +460,18 @@ def publish_note(note_id):
 @live_class_bp.route('/active', methods=['GET'])
 @api_login_required
 def get_active_classes():
-    """获取活跃的线上课堂"""
+    """获取活跃的线上课堂和最近结束的课堂"""
     # 过滤掉超过24小时的"僵尸"课堂
     cutoff_time = datetime.now() - timedelta(hours=24)
     
     if g.user.role == 'teacher':
-        # 教师：获取自己创建的活跃课堂
+        # 教师：获取自己创建的活跃课堂和最近结束的课堂
         classes = LiveClass.query.filter(
             LiveClass.teacher_id == g.user.user_id,
-            LiveClass.status == 'active',
             LiveClass.start_time > cutoff_time
         ).all()
     else:
-        # 学生：获取所属班级的活跃课堂
+        # 学生：获取所属班级的活跃课堂和最近结束的课堂
         from models import StudentClass
         student = g.user.student_profile
         if not student:
@@ -426,7 +480,6 @@ def get_active_classes():
         class_ids = [sc.class_id for sc in student_classes]
         classes = LiveClass.query.filter(
             LiveClass.class_id.in_(class_ids),
-            LiveClass.status == 'active',
             LiveClass.start_time > cutoff_time
         ).all()
     
@@ -437,9 +490,10 @@ def get_active_classes():
             'title': cls.title,
             'teacher_name': cls.teacher.real_name,
             'class_name': cls.teaching_class.class_name,
-            'class_id': cls.class_id,  # 添加班级ID
+            'class_id': cls.class_id,
             'start_time': cls.start_time.isoformat(),
-            'participants_count': cls.participants_count
+            'participants_count': cls.participants_count,
+            'status': cls.status  # 添加状态字段
         })
     
     return jsonify(result)

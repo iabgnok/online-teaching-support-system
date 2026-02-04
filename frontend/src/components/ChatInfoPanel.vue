@@ -2,7 +2,12 @@
   <div class="chat-info-panel">
     <div class="panel-header">
       <h3>对话信息</h3>
-      <el-button icon="el-icon-close" circle size="small" @click="$emit('close')"></el-button>
+      <button class="btn-close" @click="$emit('close')" title="关闭">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
     </div>
     
     <div class="panel-content">
@@ -46,6 +51,25 @@
         </div>
       </div>
       
+      <!-- Shared Content -->
+      <div class="section media-section">
+        <h4>查找聊天记录</h4>
+        <div class="media-actions">
+           <div class="media-btn" @click="$emit('filter', 'image')">
+             <i class="el-icon-picture-outline"></i>
+             <span>图片</span>
+           </div>
+           <div class="media-btn" @click="$emit('filter', 'file')">
+             <i class="el-icon-document"></i>
+             <span>文件</span>
+           </div>
+           <div class="media-btn" @click="$emit('filter', 'link')">
+             <i class="el-icon-link"></i>
+             <span>链接</span>
+           </div>
+        </div>
+      </div>
+
       <!-- 成员列表（群聊） -->
       <div v-if="conversation.type !== 'private' && conversation.members" class="section members-section">
         <h4>成员 ({{ conversation.members.length }})</h4>
@@ -160,6 +184,30 @@ const leaveConversation = async () => {
   font-size: 16px;
   font-weight: 600;
   color: #2c3e50;
+}
+
+.btn-close {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: #f5f7fa;
+  color: #909399;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.btn-close:hover {
+  background: #f56c6c;
+  color: white;
+  transform: rotate(90deg);
+}
+
+.btn-close svg {
+  display: block;
 }
 
 .panel-content {
@@ -365,5 +413,34 @@ const leaveConversation = async () => {
 
 .panel-content::-webkit-scrollbar-thumb:hover {
   background: rgba(0, 0, 0, 0.3);
+}
+</style>
+
+<style scoped>
+.media-actions {
+  display: flex;
+  justify-content: space-around;
+  margin-top: 10px;
+}
+.media-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 8px;
+  transition: background-color 0.2s;
+}
+.media-btn:hover {
+  background-color: #f5f7fa;
+}
+.media-btn i {
+  font-size: 20px;
+  margin-bottom: 4px;
+  color: #606266;
+}
+.media-btn span {
+    font-size: 12px;
+    color: #606266;
 }
 </style>

@@ -35,15 +35,22 @@ class Config:
     # 会话密钥（生产环境应使用环境变量）
     SECRET_KEY = os.environ.get('SECRET_KEY') or '38914c44f3b79a55a6d5c64c1256e2f170e7a2b9e6f3b0c51f0c2a7e089297d0'
     
-    # 数据库配置
+    # 数据库配置（添加 UTF-8 编码支持以正确处理 Emoji）
     SQLALCHEMY_DATABASE_URI = (
         f'mssql+pyodbc:///?odbc_connect='
         f'DRIVER={DB_DRIVER};'
         f'SERVER={DB_SERVER};'
         f'DATABASE={DB_NAME};'
         f'Trusted_Connection=yes;'
+        f'charset=UTF-8;'
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        'connect_args': {
+            'charset': 'utf8',
+            'use_unicode': True
+        }
+    }
 
 
 class DevelopmentConfig(Config):

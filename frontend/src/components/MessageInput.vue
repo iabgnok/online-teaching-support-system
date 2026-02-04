@@ -42,20 +42,23 @@
     <div class="telegram-input">
       <!-- 左侧按钮组 -->
       <div class="left-buttons">
-        <!-- 附件按钮 -->
+        <!-- 功能菜单按钮（+号） -->
         <el-popover
           placement="top-start"
-          :width="200"
+          :width="220"
           trigger="click"
         >
           <template #reference>
-            <button class="icon-btn" title="附件">
+            <button class="icon-btn plus-btn" title="更多功能">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="8" x2="12" y2="16"></line>
+                <line x1="8" y1="12" x2="16" y2="12"></line>
               </svg>
             </button>
           </template>
-          <div class="attachment-menu">
+          <div class="function-menu">
+            <!-- 通用功能 -->
             <el-upload
               ref="imageUpload"
               :action="uploadUrl"
@@ -66,8 +69,12 @@
               accept="image/*"
             >
               <div class="menu-item">
-                <i class="el-icon-picture-outline"></i>
-                <span>图片</span>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                  <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                  <polyline points="21 15 16 10 5 21"></polyline>
+                </svg>
+                <span>发送图片</span>
               </div>
             </el-upload>
             
@@ -80,10 +87,75 @@
               :on-success="handleFileSuccess"
             >
               <div class="menu-item">
-                <i class="el-icon-document"></i>
-                <span>文件</span>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
+                  <polyline points="13 2 13 9 20 9"></polyline>
+                </svg>
+                <span>发送文件</span>
               </div>
             </el-upload>
+
+            <!-- 课堂专属功能（仅在课堂讨论区显示） -->
+            <template v-if="showClassroomFeatures">
+              <!-- 教师专属功能 -->
+              <template v-if="userRole === 'teacher'">
+                <div class="menu-divider"></div>
+                <div class="menu-item" @click="handleStartAttendance">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                    <line x1="3" y1="10" x2="21" y2="10"></line>
+                  </svg>
+                  <span>发起考勤</span>
+                </div>
+                <div class="menu-item" @click="handlePublishTask">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                  </svg>
+                  <span>发布任务</span>
+                </div>
+                <div class="menu-item" @click="handleShareBoard">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                    <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                    <polyline points="21 15 16 10 5 21"></polyline>
+                  </svg>
+                  <span>分享板书</span>
+                </div>
+                <div class="menu-item" @click="handleScreenShare">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                    <line x1="8" y1="21" x2="16" y2="21"></line>
+                    <line x1="12" y1="17" x2="12" y2="21"></line>
+                  </svg>
+                  <span>屏幕共享</span>
+                </div>
+              </template>
+
+              <!-- 学生专属功能 -->
+              <template v-if="userRole === 'student'">
+                <div class="menu-divider"></div>
+                <div class="menu-item" @click="handleRaiseHand">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0"></path>
+                    <path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2"></path>
+                    <path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8"></path>
+                    <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"></path>
+                  </svg>
+                  <span>举手发言</span>
+                </div>
+                <div class="menu-item" @click="handleAskQuestion">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                  </svg>
+                  <span>提问</span>
+                </div>
+              </template>
+            </template>
           </div>
         </el-popover>
         
@@ -121,6 +193,7 @@
           v-model="messageContent"
           class="message-textarea"
           :placeholder="placeholder"
+          :disabled="isInputDisabled"
           @keydown.enter.exact.prevent="handleEnterKey"
           @keydown.shift.enter="handleNewLine"
           @keydown="handleKeyDown"
@@ -165,10 +238,16 @@ import MentionSelector from './MentionSelector.vue'
 const props = defineProps({
   conversationId: Number,
   replyTo: Object,
-  editingMessage: Object
+  editingMessage: Object,
+  conversationSubtype: String,  // 'channel', 'normal', 'discussion'
+  discussionMode: Boolean,  // 是否在讨论模式中
+  showClassroomFeatures: {  // 是否显示课堂专属功能（考勤、任务、板书等）
+    type: Boolean,
+    default: false
+  }
 })
 
-const emit = defineEmits(['send', 'cancel-reply', 'cancel-edit', 'typing'])
+const emit = defineEmits(['send', 'cancel-reply', 'cancel-edit', 'typing', 'screen-share', 'start-poll', 'assign-task', 'raise-hand', 'ask-question', 'start-attendance', 'publish-task', 'share-board'])
 
 const messageContent = ref('')
 const textareaRef = ref(null)
@@ -177,11 +256,23 @@ const isDragging = ref(false)
 const isTyping = ref(false)
 let typingTimer = null
 
+// 获取用户角色
+const userRole = localStorage.getItem('user_role')
+
 // @提及相关
 const showMentionSelector = ref(false)
 const mentionKeyword = ref('')
 const mentionPosition = ref({ top: 0, left: 0 })
 const mentionStartPos = ref(-1)
+
+// 判断输入框是否应该禁用
+const isInputDisabled = computed(() => {
+  // 如果是频道且不在讨论模式，学生无法发送消息
+  if (props.conversationSubtype === 'channel' && !props.discussionMode && userRole !== 'teacher') {
+    return true
+  }
+  return false
+})
 
 const uploadUrl = computed(() => `/api/v1/chat/upload`)
 const uploadHeaders = computed(() => ({
@@ -189,13 +280,14 @@ const uploadHeaders = computed(() => ({
 }))
 
 const placeholder = computed(() => {
+  if (isInputDisabled.value) return '只有教师可以在频道中发布消息，您可以点击消息下方的"讨论"按钮参与评论'
   if (props.editingMessage) return '编辑消息...'
   if (props.replyTo) return `回复 ${props.replyTo.sender_name}...`
   return '输入消息... (Shift+Enter换行, Enter发送)'
 })
 
 const canSend = computed(() => {
-  return messageContent.value.trim().length > 0
+  return !isInputDisabled.value && messageContent.value.trim().length > 0
 })
 
 // Emoji 列表
@@ -242,6 +334,48 @@ const sendMessage = () => {
   messageContent.value = ''
   stopTyping()
   resetTextareaHeight()
+}
+
+// 教师功能处理
+const handleStartAttendance = () => {
+  emit('start-attendance')
+  ElMessage.success('发起考勤')
+}
+
+const handlePublishTask = () => {
+  emit('publish-task')
+  ElMessage.success('发布任务')
+}
+
+const handleShareBoard = () => {
+  emit('share-board')
+  ElMessage.success('分享板书')
+}
+
+const handleScreenShare = () => {
+  emit('screen-share')
+  ElMessage.success('屏幕共享功能')
+}
+
+const handleStartPoll = () => {
+  emit('start-poll')
+  ElMessage.success('发起投票功能')
+}
+
+const handleAssignTask = () => {
+  emit('assign-task')
+  ElMessage.success('布置作业功能')
+}
+
+// 学生功能处理
+const handleRaiseHand = () => {
+  emit('raise-hand')
+  ElMessage.success('已举手发言')
+}
+
+const handleAskQuestion = () => {
+  emit('ask-question')
+  ElMessage.success('提问功能')
 }
 
 const handleNewLine = (e) => {
@@ -684,8 +818,16 @@ defineExpose({
   }
 }
 
-/* 附件菜单 */
+/* 附件菜单（已废弃，使用function-menu） */
 .attachment-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+}
+
+/* 功能菜单 */
+.function-menu {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -699,11 +841,22 @@ defineExpose({
   padding: 10px 12px;
   cursor: pointer;
   border-radius: 8px;
-  transition: background 0.2s;
+  transition: all 0.2s;
+  user-select: none;
 }
 
 .menu-item:hover {
-  background: #f0f2f5;
+  background: #ecf5ff;
+}
+
+.menu-item svg {
+  flex-shrink: 0;
+  color: #409eff;
+  transition: transform 0.2s;
+}
+
+.menu-item:hover svg {
+  transform: scale(1.1);
 }
 
 .menu-item i {
@@ -715,6 +868,32 @@ defineExpose({
   font-size: 14px;
   color: #303133;
   font-weight: 500;
+}
+
+/* 菜单分隔线 */
+.menu-divider {
+  height: 1px;
+  background: #e4e7ed;
+  margin: 4px 0;
+}
+
+/* Plus按钮特殊样式 */
+.plus-btn {
+  position: relative;
+}
+
+.plus-btn::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.plus-btn:hover::before {
+  opacity: 0.1;
 }
 
 /* Emoji 选择器 */

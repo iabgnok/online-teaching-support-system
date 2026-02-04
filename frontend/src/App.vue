@@ -38,6 +38,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import api from './api'
+import { eventBus } from './utils/eventBus'
 
 const router = useRouter()
 const route = useRoute()
@@ -109,6 +110,11 @@ onMounted(() => {
   
   // 每30秒更新一次未读数
   unreadCountInterval = setInterval(fetchUnreadCount, 30000)
+  
+  // 监听来自 Chat 组件的未读数更新事件
+  eventBus.on('unread-count-changed', (count) => {
+    unreadCount.value = count
+  })
 })
 
 // 监听路由变化，在登录页时停止轮询
@@ -136,7 +142,7 @@ const navigationLinks = computed(() => {
   if (userRole.value === 'admin') {
     return [
       { path: '/admin/dashboard', label: '管理员控制台', icon: 'el-icon-menu' },
-      { path: '/chat', label: '消息中心', icon: 'el-icon-chat-dot-round', badge: unreadCount.value },
+      { path: '/chat', label: '教学群组', icon: 'el-icon-chat-dot-round', badge: unreadCount.value },
       { path: '/messages', label: '站内信', icon: 'el-icon-message' },
       { path: '/profile', label: '账户信息', icon: 'el-icon-user' }
     ]
@@ -144,7 +150,7 @@ const navigationLinks = computed(() => {
     return [
       { path: '/teacher/dashboard', label: '工作台', icon: 'el-icon-s-home' },
       { path: '/teacher/teaching-plan', label: '教学计划', icon: 'el-icon-document' },
-      { path: '/chat', label: '消息中心', icon: 'el-icon-chat-dot-round', badge: unreadCount.value },
+      { path: '/chat', label: '教学群组', icon: 'el-icon-chat-dot-round', badge: unreadCount.value },
       { path: '/forum', label: '论坛', icon: 'el-icon-chat-line-square' },
       { path: '/messages', label: '站内信', icon: 'el-icon-message' },
       { path: '/profile', label: '账户信息', icon: 'el-icon-user' }
@@ -154,7 +160,7 @@ const navigationLinks = computed(() => {
       { path: '/', label: '首页', icon: 'el-icon-s-home' },
       { path: '/schedule', label: '日程', icon: 'el-icon-calendar' },
       { path: '/my-grades', label: '我的成绩', icon: 'el-icon-document' },
-      { path: '/chat', label: '消息中心', icon: 'el-icon-chat-dot-round', badge: unreadCount.value },
+      { path: '/chat', label: '教学群组', icon: 'el-icon-chat-dot-round', badge: unreadCount.value },
       { path: '/forum', label: '论坛', icon: 'el-icon-chat-line-square' },
       { path: '/messages', label: '站内信', icon: 'el-icon-message' },
       { path: '/profile', label: '账户信息', icon: 'el-icon-user' }
@@ -188,11 +194,12 @@ const logout = async () => {
   }
 }
 
-// 组件卸载时清理定时器
+// 组件卸载时清理定时器和事件监听
 onUnmounted(() => {
   if (unreadCountInterval) {
     clearInterval(unreadCountInterval)
   }
+  eventBus.off('unread-count-changed')
 })
 </script>
 

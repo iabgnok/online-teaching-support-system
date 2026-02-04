@@ -185,10 +185,27 @@ const handleStartClass = async (settings) => {
 }
 
 // 进入课堂
-const handleJoinClass = () => {
+const handleJoinClass = async () => {
   if (!activeClassInfo.value) return
   
   const lessonId = activeClassInfo.value.lesson_id
+  
+  // 先验证课堂状态
+  try {
+    const response = await api.get(`/live-class/${lessonId}/check`)
+    if (response.data.status === 'ended') {
+      ElMessage.warning('课堂已结束，无法进入')
+      activeClassInfo.value = null // 清除活跃课堂信息
+      return
+    }
+  } catch (error) {
+    if (error.response?.status === 403) {
+      ElMessage.error(error.response.data.error || '课堂已结束')
+      activeClassInfo.value = null
+      return
+    }
+    console.error('检查课堂状态失败:', error)
+  }
   
   if (userRole.value === 'teacher') {
     router.push(`/teacher/live-class/${lessonId}`)

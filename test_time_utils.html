@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>时间工具函数测试</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .test-case {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .test-case h3 {
+            margin-top: 0;
+            color: #333;
+        }
+        .result {
+            padding: 10px;
+            background-color: #f5f5f5;
+            border-radius: 3px;
+            margin: 5px 0;
+        }
+        .pass {
+            color: green;
+        }
+        .fail {
+            color: red;
+        }
+    </style>
+</head>
+<body>
+    <h1>时间工具函数测试</h1>
+    <div id="test-results"></div>
+
+    <script type="module">
+        // 复制 timeUtils.js 中的函数
+        function parseBackendTime(timestamp) {
+            if (!timestamp) return null
+            
+            try {
+                let dateStr = timestamp
+                
+                if (typeof timestamp === 'string' && timestamp.includes('+00:00')) {
+                    dateStr = timestamp.replace('+00:00', '').replace('T', ' ')
+                } else if (typeof timestamp === 'string' && timestamp.includes('Z')) {
+                    dateStr = timestamp.replace('Z', '').replace('T', ' ')
+                } else if (typeof timestamp === 'string' && timestamp.includes('T')) {
+                    dateStr = timestamp.replace('T', ' ')
+                }
+                
+                const date = new Date(dateStr)
+                
+                if (isNaN(date.getTime())) {
+                    console.error('Invalid timestamp:', timestamp)
+                    return null
+                }
+                
+                return date
+            } catch (error) {
+                console.error('Error parsing timestamp:', timestamp, error)
+                return null
+            }
+        }
+
+        function formatTime(timestamp) {
+            if (!timestamp) return ''
+            
+            const date = parseBackendTime(timestamp)
+            if (!date) return '--:--'
+            
+            const hours = String(date.getHours()).padStart(2, '0')
+            const minutes = String(date.getMinutes()).padStart(2, '0')
+            
+            return `${hours}:${minutes}`
+        }
+
+        // 测试用例
+        const now = new Date()
+        const currentHour = now.getHours()
+        const currentMinute = now.getMinutes()
+        const expectedTime = `${String(currentHour).padStart(2, '0')}:${String(currentMinute).padStart(2, '0')}`
+
+        // 模拟后端返回的时间（北京时间但标记为UTC）
+        const backendTime = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}T${String(currentHour).padStart(2, '0')}:${String(currentMinute).padStart(2, '0')}:00.000000+00:00`
+
+        const testCases = [
+            {
+                name: '测试后端返回的时间格式（+00:00）',
+                input: backendTime,
+                expected: expectedTime,
+                fn: formatTime
+            },
+            {
+                name: '测试 ISO 格式时间（Z）',
+                input: backendTime.replace('+00:00', 'Z'),
+                expected: expectedTime,
+                fn: formatTime
+            },
+            {
+                name: '测试标准 ISO 格式',
+                input: backendTime.replace('+00:00', ''),
+                expected: expectedTime,
+                fn: formatTime
+            }
+        ]
+
+        const resultsDiv = document.getElementById('test-results')
+        
+        testCases.forEach((testCase, index) => {
+            const result = testCase.fn(testCase.input)
+            const pass = result === testCase.expected
+            
+            const testDiv = document.createElement('div')
+            testDiv.className = 'test-case'
+            testDiv.innerHTML = `
+                <h3>测试 ${index + 1}: ${testCase.name}</h3>
+                <div class="result">输入: ${testCase.input}</div>
+                <div class="result">预期: ${testCase.expected}</div>
+                <div class="result ${pass ? 'pass' : 'fail'}">实际: ${result}</div>
+                <div class="result ${pass ? 'pass' : 'fail'}">结果: ${pass ? '✅ 通过' : '❌ 失败'}</div>
+            `
+            resultsDiv.appendChild(testDiv)
+        })
+
+        // 显示当前系统信息
+        const infoDiv = document.createElement('div')
+        infoDiv.className = 'test-case'
+        infoDiv.innerHTML = `
+            <h3>系统信息</h3>
+            <div class="result">当前时间: ${now.toLocaleString('zh-CN')}</div>
+            <div class="result">时区偏移: UTC${now.getTimezoneOffset() / -60}</div>
+            <div class="result">预期显示时间: ${expectedTime}</div>
+        `
+        resultsDiv.insertBefore(infoDiv, resultsDiv.firstChild)
+    </script>
+</body>
+</html>

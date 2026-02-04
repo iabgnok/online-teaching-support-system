@@ -20,18 +20,23 @@
     </div>
 
     <div v-else class="classes-list">
-      <div class="class-card" v-for="classItem in activeClasses" :key="classItem.lesson_id">
+      <div class="class-card" v-for="classItem in activeClasses" :key="classItem.lesson_id" :class="{ 'ended': classItem.status === 'ended' }">
         <div class="class-info">
-          <h3>{{ classItem.title }}</h3>
+          <div class="title-row">
+            <h3>{{ classItem.title }}</h3>
+            <span v-if="classItem.status === 'ended'" class="status-badge ended">已结束</span>
+            <span v-else class="status-badge active">进行中</span>
+          </div>
           <p class="class-name">{{ classItem.class_name }}</p>
           <p class="teacher">教师: {{ classItem.teacher_name }}</p>
           <p class="time">开始时间: {{ formatTime(classItem.start_time) }}</p>
           <p class="participants">参与人数: {{ classItem.participants_count }}</p>
         </div>
         <div class="actions">
-          <button @click="joinClass(classItem.lesson_id)" class="btn-primary">
+          <button v-if="classItem.status !== 'ended'" @click="joinClass(classItem.lesson_id, classItem.status)" class="btn-primary">
             进入课堂
           </button>
+          <div v-else class="ended-text">课堂已结束</div>
         </div>
       </div>
     </div>
@@ -109,7 +114,33 @@ export default {
       }
     },
 
-    joinClass(lessonId) {
+    async joinClass(lessonId, status) {
+      // 检查本地状态
+      if (status === 'ended') {
+        alert('课堂已结束，无法进入')
+        return
+      }
+      
+      // 调用API验证课堂状态
+      try {
+        const response = await api.get(`/live-class/${lessonId}/check`)
+        if (response.data.status === 'ended') {
+          alert('课堂已结束，无法进入')
+          // 刷新课堂列表
+          this.loadActiveClasses()
+          return
+        }
+      } catch (error) {
+        if (error.response?.status === 403) {
+          alert(error.response.data.error || '课堂已结束')
+          // 刷新课堂列表
+          this.loadActiveClasses()
+          return
+        }
+        console.error('检查课堂状态失败:', error)
+      }
+      
+      // 跳转到课堂
       if (this.userRole === 'teacher') {
         this.$router.push(`/teacher/live-class/${lessonId}`)
       } else {
@@ -218,11 +249,48 @@ export default {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  transition: all 0.3s;
+}
+
+.class-card.ended {
+  background: linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%);
+  opacity: 0.8;
+}
+
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 0.5rem;
 }
 
 .class-info h3 {
-  margin: 0 0 0.5rem 0;
+  margin: 0;
   color: #333;
+}
+
+.class-card.ended .class-info h3 {
+  color: #999;
+}
+
+.status-badge {
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.status-badge.active {
+  background: rgba(16, 185, 129, 0.2);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+
+.status-badge.ended {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.4);
 }
 
 .class-info p {
@@ -231,8 +299,20 @@ export default {
   font-size: 0.9rem;
 }
 
+.class-card.ended .class-info p {
+  color: #999;
+}
+
 .actions {
   flex-shrink: 0;
+}
+
+.ended-text {
+  padding: 0.75rem 1.5rem;
+  color: #999;
+  font-size: 1rem;
+  font-weight: 500;
+  text-align: center;
 }
 
 /* Modal styles */

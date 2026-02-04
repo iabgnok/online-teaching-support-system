@@ -24,9 +24,9 @@
       </div>
     </div>
 
-    <!-- 主要内容区域 -->
+    <!-- 主要内容区域：画板和讨论区的父容器 -->
     <div class="main-content">
-      <!-- 左侧：画板区域 -->
+      <!-- 画板区域 -->
       <div class="canvas-section">
         <div class="canvas-toolbar">
           <button @click="setTool('pen')" :class="{ active: currentTool === 'pen' }">✏️ 画笔</button>
@@ -54,280 +54,25 @@
         </div>
       </div>
 
-      <!-- 右侧：屏幕共享和聊天 -->
-      <div class="right-panel">
-        
-        <!-- 屏幕共享区域 -->
-        <div class="screen-share-section" v-if="isSharing">
-          <div class="screen-preview">
-            <video ref="screenVideo" autoplay muted></video>
-          </div>
-        </div>
-
-        <!-- 聊天区域 - Telegram风格升级版 -->
-        <div class="chat-section telegram-style">
-          <div class="chat-header">
-            <div class="header-left">
-              <h3>💬 课堂交流</h3>
-              <span class="online-count">{{ participantsCount }} 人在线</span>
-            </div>
-            <div class="header-actions">
-              <button class="icon-btn" @click="scrollToBottom" title="滚动到底部">
-                <i class="el-icon-bottom"></i>
-              </button>
-            </div>
-          </div>
-          
-          <div class="chat-messages" ref="messagesContainer" @scroll="handleScroll">
-            <!-- 加载更多提示 -->
-            <div v-if="hasMoreMessages" class="load-more-hint">
-              <span @click="loadMoreMessages">加载更早的消息...</span>
-            </div>
-            
-            <template v-for="(msg, index) in messages" :key="msg.id">
-              <!-- 时间分隔线 -->
-              <div v-if="shouldShowTimeDivider(msg, index)" class="time-divider">
-                <span>{{ formatDateDivider(msg.timestamp) }}</span>
-              </div>
-              
-              <!-- 系统消息 -->
-              <div v-if="msg.message_type === 'system'" class="system-message">
-                <span class="system-icon">ℹ️</span>
-                {{ msg.message }}
-              </div>
-
-              <!-- 考勤卡片 - 升级版 -->
-              <div v-else-if="msg.message_type === 'attendance'" class="special-card-wrapper">
-                <div class="attendance-card">
-                  <div class="card-header">
-                    <span class="card-icon">📅</span>
-                    <span class="card-title">{{ getJsonContent(msg.message).title || '课堂考勤' }}</span>
-                    <span class="status-badge active">进行中</span>
-                  </div>
-                  <div class="card-body">
-                    <div class="progress-section">
-                      <div class="progress-bar">
-                        <div class="progress-fill" :style="{ width: getAttendanceProgress(msg) + '%' }"></div>
-                      </div>
-                      <div class="progress-text">
-                        <span class="count-text">
-                          <strong>{{ getJsonContent(msg.message).count || 0 }}</strong> / {{ participantsCount }} 人已签到
-                        </span>
-                        <span class="percentage">{{ getAttendanceProgress(msg) }}%</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="card-footer">
-                    <button class="card-btn" @click="viewAttendanceDetail(msg)">
-                      <i class="el-icon-view"></i> 查看详情
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <!-- 任务卡片 - 增强版 -->
-               <div v-else-if="msg.message_type === 'task'" class="special-card-wrapper">
-                 <div class="task-card">
-                   <div class="card-header">
-                     <span class="card-icon">
-                       {{ getTaskTypeIcon(getJsonContent(msg.message).type) }}
-                     </span>
-                     <span class="card-title">
-                       {{ getJsonContent(msg.message).title || '课堂任务' }}
-                     </span>
-                     <span class="author-badge">我发布</span>
-                     <span class="type-badge" :class="getTaskTypeClass(getJsonContent(msg.message).type)">
-                       {{ getTaskTypeLabel(getJsonContent(msg.message).type) }}
-                     </span>
-                   </div>
-                   <div class="card-body">
-                     <!-- 任务描述 -->
-                     <div class="task-content">{{ getJsonContent(msg.message).content || getJsonContent(msg.message).desc }}</div>
-                     
-                     <!-- 任务详情 -->
-                     <div class="task-meta">
-                       <div class="meta-item">
-                         <i class="el-icon-time"></i>
-                         <span>截止: {{ formatDeadline(getJsonContent(msg.message).deadline) }}</span>
-                       </div>
-                       <div class="meta-item" v-if="getJsonContent(msg.message).estimated_time">
-                         <i class="el-icon-clock"></i>
-                         <span>预计 {{ getJsonContent(msg.message).estimated_time }} 分钟</span>
-                       </div>
-                       <div class="meta-item" v-if="getJsonContent(msg.message).total_score">
-                         <i class="el-icon-medal"></i>
-                         <span>{{ getJsonContent(msg.message).total_score }} 分</span>
-                       </div>
-                       <div class="meta-item" v-if="getJsonContent(msg.message).submit_type">
-                         <i class="el-icon-upload"></i>
-                         <span>{{ getSubmitTypeLabel(getJsonContent(msg.message).submit_type) }}</span>
-                       </div>
-                     </div>
-
-                     <!-- 提示信息 -->
-                     <div class="task-hint" v-if="getJsonContent(msg.message).hint">
-                       <i class="el-icon-info"></i>
-                       <span>{{ getJsonContent(msg.message).hint }}</span>
-                     </div>
-
-                     <!-- 进度条 -->
-                     <div class="progress-section">
-                       <div class="progress-bar">
-                         <div class="progress-fill success" :style="{ width: getTaskProgress(msg) + '%' }"></div>
-                       </div>
-                       <div class="progress-text">
-                         <span class="count-text">
-                           <i class="el-icon-check"></i> 
-                           <strong>{{ (getJsonContent(msg.message).completed_ids || []).length }}</strong> 人已完成
-                         </span>
-                         <span class="percentage">{{ getTaskProgress(msg) }}%</span>
-                       </div>
-                     </div>
-                   </div>
-                   <div class="card-footer">
-                     <button class="card-btn secondary" @click="viewTaskDetail(msg)">
-                       <i class="el-icon-tickets"></i> 完成列表
-                     </button>
-                     <button class="card-btn primary" @click="remindStudents(msg)">
-                       <i class="el-icon-bell"></i> 提醒未完成
-                     </button>
-                   </div>
-                 </div>
-               </div>
-              
-              <!-- 用户消息 - Telegram风格 -->
-              <div
-                v-else
-                class="message-wrapper"
-                :class="{ 'own-message': String(msg.user_id) === String(currentUserId) }"
-                @contextmenu.prevent="showContextMenu($event, msg)"
-              >
-                <!-- 对方消息：左侧显示头像和名字 -->
-                <template v-if="String(msg.user_id) !== String(currentUserId)">
-                  <div class="message-avatar">
-                    <div class="avatar-circle">{{ msg.user_name.charAt(0).toUpperCase() }}</div>
-                  </div>
-                  <div class="message-content">
-                    <div class="message-author">{{ msg.user_name }}</div>
-                    <div class="message-bubble received">
-                      <div class="bubble-text">{{ msg.message }}</div>
-                      <div class="bubble-meta">
-                        <span class="bubble-time">{{ formatTime(msg.timestamp) }}</span>
-                      </div>
-                    </div>
-                  </div>
-                </template>
-                
-                <!-- 自己的消息：右侧，蓝色气泡 -->
-                <template v-else>
-                  <div class="message-content">
-                    <div class="message-bubble sent">
-                      <div class="bubble-text">{{ msg.message }}</div>
-                      <div class="bubble-meta">
-                        <span class="bubble-time">{{ formatTime(msg.timestamp) }}</span>
-                        <span class="bubble-status">
-                          <i class="el-icon-check"></i>
-                          <i class="el-icon-check"></i>
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="message-avatar own">
-                    <div class="avatar-circle">教</div>
-                  </div>
-                </template>
-              </div>
-            </template>
-            
-            <!-- 正在输入提示 -->
-            <div v-if="someoneTyping" class="typing-indicator">
-              <div class="typing-avatar">
-                <div class="avatar-circle small">{{ someoneTyping.charAt(0) }}</div>
-              </div>
-              <div class="typing-bubble">
-                <div class="typing-dots">
-                  <span></span><span></span><span></span>
-                </div>
-              </div>
-            </div>
-            
-            <!-- 右键菜单 -->
-            <div 
-                v-if="contextMenu.visible" 
-                class="context-menu telegram" 
-                :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }"
-                @click.stop
-            >
-                <div class="context-menu-item" @click="replyToMessage">
-                    <i class="el-icon-chat-line-round"></i> 回复
-                </div>
-                <div class="context-menu-item delete" @click="confirmDeleteMessage">
-                    <i class="el-icon-delete"></i> 撤回消息
-                </div>
-            </div>
-
-          </div>
-          
-          <!-- 滚动到底部按钮 -->
-          <transition name="fade">
-            <div v-if="showScrollButton" class="scroll-to-bottom" @click="scrollToBottom">
-              <i class="el-icon-bottom"></i>
-              <span v-if="unreadCount > 0" class="unread-badge">{{ unreadCount }}</span>
-            </div>
-          </transition>
-          
-          <!-- 输入区域 - 优化版 -->
-          <div class="chat-input-container">
-            <!-- 工具栏 -->
-            <div class="input-toolbar">
-              <div class="toolbar-left">
-                <button class="tool-button" @click="toggleActionMenu" title="更多功能">
-                  <i class="el-icon-plus"></i>
-                </button>
-                <!-- 功能菜单 -->
-                <transition name="slide-up">
-                  <div v-if="showActionMenu" class="action-menu">
-                    <div class="menu-item" @click="startAttendance">
-                      <i class="el-icon-date"></i>
-                      <span>发起考勤</span>
-                    </div>
-                    <div class="menu-item" @click="publishTask">
-                      <i class="el-icon-edit"></i>
-                      <span>发布任务</span>
-                    </div>
-                    <div class="menu-item" @click="shareBoard">
-                      <i class="el-icon-picture"></i>
-                      <span>分享板书</span>
-                    </div>
-                  </div>
-                </transition>
-              </div>
-            </div>
-            
-            <!-- 输入框 -->
-            <div class="input-area">
-              <textarea
-                v-model="newMessage"
-                ref="messageInput"
-                placeholder="输入消息... (Shift+Enter 换行)"
-                @keydown.enter.exact.prevent="sendMessage"
-                @keydown.shift.enter="handleShiftEnter"
-                @input="handleTyping"
-                class="message-input"
-                rows="1"
-              ></textarea>
-              <button 
-                class="send-button" 
-                @click="sendMessage" 
-                :disabled="!newMessage.trim()"
-                :class="{ active: newMessage.trim() }"
-              >
-                <i class="el-icon-position"></i>
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+      <!-- 可折叠讨论区组件 -->
+      <CollapsibleDiscussionPanel
+        v-if="discussionConversationId"
+        ref="discussionPanel"
+        :discussion-conversation-id="discussionConversationId"
+        :class-group-conversation-id="classGroupConversationId"
+        :role="'teacher'"
+        :current-user-id="currentUserId"
+        :class-group-name="classGroupName"
+        :total-participants="participantsCount"
+        @send-message="handleSendMessage"
+        @load-more="handleLoadMore"
+        @view-attendance="viewAttendanceDetail"
+        @view-task="viewTaskDetail"
+        @remind-students="remindStudents"
+        @start-attendance="startAttendance"
+        @publish-task="publishTask"
+        @share-board="shareBoard"
+      />
     </div>
 
     <!-- 参与者列表 -->
@@ -483,9 +228,13 @@
 <script>
 import io from 'socket.io-client'
 import api from '../../api'
+import CollapsibleDiscussionPanel from '@/components/CollapsibleDiscussionPanel.vue'
 
 export default {
   name: 'TeacherLiveClass',
+  components: {
+    CollapsibleDiscussionPanel
+  },
   props: {
     lessonId: {
       type: String,
@@ -503,6 +252,11 @@ export default {
       newMessage: '',
       currentUserId: null,
       currentUserName: '',
+      
+      // 新增：讨论区相关
+      discussionConversationId: null,
+      classGroupConversationId: null,
+      classGroupName: '',
       
       showActionMenu: false,
       
@@ -652,8 +406,13 @@ export default {
         this.drawFromServer(data)
       })
 
-      this.socket.on('new_message', (data) => {
-        console.log('Teacher received new_message:', data)
+      this.socket.on('chat:new_message', (data) => {
+        console.log('Teacher received chat:new_message:', data)
+        // 将消息传递给CollapsibleDiscussionPanel组件
+        if (this.$refs.discussionPanel && data.conversation_id) {
+          this.$refs.discussionPanel.receiveMessage(data)
+        }
+        // 也添加到旧的messages数组（如果还在使用）
         this.addMessage(data)
       })
 
@@ -979,6 +738,14 @@ export default {
       api.get(`/live-class/${this.lessonId}/join`)
       .then(res => {
         this.classInfo = res.data
+        // 保存课堂讨论区conversation_id
+        this.discussionConversationId = res.data.conversation_id
+        
+        // 加载班级群聊信息
+        if (res.data.class_id) {
+          this.loadClassGroupInfo(res.data.class_id)
+        }
+        
         // 加载历史消息
         if (res.data.history && Array.isArray(res.data.history)) {
           this.messages = res.data.history.map(m => ({
@@ -998,15 +765,31 @@ export default {
         this.$router.go(-1)
       })
     },
+    
+    loadClassGroupInfo(classId) {
+      api.get(`/chat/class/${classId}/group`)
+      .then(res => {
+        this.classGroupConversationId = res.data.conversation_id
+        this.classGroupName = res.data.name
+      })
+      .catch(err => {
+        console.error('Failed to load class group info:', err)
+        // 班级群聊可选，加载失败不影响课堂讨论区
+      })
+    },
 
     // 滚动到底部
     scrollToBottom() {
       const container = this.$refs.messagesContainer
       if (container) {
-        this.isUserScrolling = false
-        container.scrollTop = container.scrollHeight
-        this.unreadCount = 0
-        this.showScrollButton = false
+        try {
+          this.isUserScrolling = false
+          container.scrollTop = container.scrollHeight
+          this.unreadCount = 0
+          this.showScrollButton = false
+        } catch (error) {
+          console.error('Error scrolling to bottom:', error)
+        }
       }
     },
     
@@ -1015,12 +798,15 @@ export default {
     // 处理滚动事件
     handleScroll(e) {
       const container = e.target
-      const scrollTop = container.scrollTop
-      const scrollHeight = container.scrollHeight
-      const clientHeight = container.clientHeight
+      if (!container) return
       
-      // 检查是否滚动到底部
-      const isAtBottom = scrollHeight - scrollTop - clientHeight < 100
+      try {
+        const scrollTop = container.scrollTop
+        const scrollHeight = container.scrollHeight
+        const clientHeight = container.clientHeight
+        
+        // 检查是否滚动到底部
+        const isAtBottom = scrollHeight - scrollTop - clientHeight < 100
       
       if (isAtBottom) {
         this.showScrollButton = false
@@ -1034,6 +820,9 @@ export default {
       // 检查是否需要加载更多消息
       if (scrollTop < 200 && this.hasMoreMessages) {
         this.loadMoreMessages()
+      }
+      } catch (error) {
+        console.error('Error in handleScroll:', error)
       }
     },
     
@@ -1480,10 +1269,34 @@ export default {
 
       this.$nextTick(() => {
         const container = this.$refs.messagesContainer
-        container.scrollTop = container.scrollHeight
+        if (container) {
+          try {
+            container.scrollTop = container.scrollHeight
+          } catch (error) {
+            console.error('Error scrolling after new message:', error)
+          }
+        }
       })
     },
 
+    // ========== CollapsibleDiscussionPanel事件处理 ==========
+    
+    handleSendMessage({ conversationId, message, chatType, messageType }) {
+      // 参考Chat.vue的实现，使用chat:send_message事件
+      this.socket.emit('chat:send_message', {
+        conversation_id: conversationId,
+        user_id: this.currentUserId,
+        content: message,
+        message_type: messageType || 'text',
+        lesson_id: chatType === 'discussion' ? this.lessonId : null
+      })
+    },
+    
+    handleLoadMore({ conversationId, chatType }) {
+      // 加载更多消息 - 待实现
+      console.log('Load more messages for:', conversationId, chatType)
+    },
+    
     // 其他方法
     endClass() {
       if (confirm('确定要结束授课吗？')) {
@@ -1647,12 +1460,13 @@ export default {
   flex: 1;
   display: flex;
   padding: 16px;
-  gap: 16px;
+  gap: 0;
   background: #f5f7fa;
+  position: relative;
 }
 
 .canvas-section {
-  flex: 2;
+  flex: 1;
   background: white;
   border-radius: 12px;
   padding: 16px;
@@ -1660,6 +1474,8 @@ export default {
   flex-direction: column;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
   border: 1px solid #e5e5e5;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  margin-right: 0;
 }
 
 .canvas-toolbar {
@@ -1761,32 +1577,8 @@ canvas {
     background: #e2e6ea;
 }
 
-.right-panel {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.screen-share-section {
-  background: white;
-  border-radius: 12px;
-  padding: 16px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-  border: 1px solid #e5e5e5;
-}
-
-.screen-preview {
-  background: #000;
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.screen-preview video {
-  width: 100%;
-  height: 200px;
-  object-fit: contain;
-}
+/* ========== 移除旧的右侧面板样式 ==========  */
+/* CollapsibleDiscussionPanel组件现在直接在main-content中，不需要额外的right-panel包装 */
 
 /* ========== Telegram风格聊天区域样式 ========== */
 

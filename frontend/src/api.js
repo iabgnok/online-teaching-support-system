@@ -36,8 +36,9 @@ api.interceptors.response.use(
   error => {
     if (error.response && error.response.status === 401) {
       // 关键：只有当报错的不是非核心接口时，才清空存储并跳转
-      // 非核心接口包括：未读消息查询等不影响主流程的接口
-      const isCriticalError = !error.config.url.includes('/chat/conversations')
+      // 非核心接口包括：未读消息查询、直播状态查询等不影响主流程的接口
+      const isCriticalError = !error.config.url.includes('/chat/conversations') && 
+                               !error.config.url.includes('/chat/live_status')
       
       console.log('401错误 - URL:', error.config.url, '| 是否关键接口:', isCriticalError)
       

@@ -545,6 +545,8 @@ def register_socket_events(socketio):
         content = data.get('content')
         message_type = data.get('message_type', 'text')
         reply_to_id = data.get('reply_to_id')
+        root_message_id = data.get('root_message_id')  # Telegram式评论
+        parent_message_id = data.get('parent_message_id')  # 评论回复
         
         if not conversation_id or not user_id:
             return
@@ -569,6 +571,8 @@ def register_socket_events(socketio):
                 content=content,
                 message_type=message_type,
                 reply_to_id=reply_to_id,
+                root_message_id=root_message_id,
+                parent_message_id=parent_message_id,
                 media_url=data.get('media_url'),
                 file_name=data.get('file_name'),
                 file_size=data.get('file_size'),
@@ -607,6 +611,12 @@ def register_socket_events(socketio):
             membership.draft_content = None
             membership.draft_updated_at = None
             
+            # 如果是频道评论，更新根消息的评论计数
+            if root_message_id:
+                root_message = IMMessage.query.get(root_message_id)
+                if root_message:
+                    root_message.comment_count = (root_message.comment_count or 0) + 1
+            
             db.session.commit()
             
             # 构建消息数据
@@ -618,6 +628,8 @@ def register_socket_events(socketio):
                 'content': content,
                 'message_type': message_type,
                 'reply_to_id': reply_to_id,
+                'root_message_id': root_message_id,
+                'parent_message_id': parent_message_id,
                 'media_url': message.media_url,
                 'file_name': message.file_name,
                 'created_at': message.created_at.isoformat()

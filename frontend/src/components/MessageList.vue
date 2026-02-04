@@ -7,13 +7,15 @@
     <div class="messages">
       <template v-for="(message, index) in messages" :key="message.id">
         <!-- 时间分隔线 -->
-        <div v-if="shouldShowDateDivider(message, index)" class="date-divider">
+        <div v-if="shouldShowDateDividerLocal(message, index)" class="date-divider">
           <span>{{ formatDateDivider(message.created_at) }}</span>
         </div>
         
         <!-- 消息项 -->
         <div 
           :class="['message-item', message.sender_id == currentUserId ? 'sent' : 'received']"
+          :data-message-id="message.id"
+          :ref="el => { if (index === messages.length - 1) lastMsgRef = el }"
           @contextmenu.prevent="showContextMenu($event, message)"
         >
           <div v-if="message.sender_id != currentUserId" class="avatar">
@@ -45,22 +47,29 @@
                 <i class="el-icon-document"></i>
                 <span>{{ message.file_name }}</span>
               </div>
-              <div v-else-if="message.message_type === 'live_class_entry'" class="live-class-entry">
+              <div v-else-if="message.message_type === 'live_class_entry'" class="live-class-entry" :class="{ 'class-ended': getClassEntryData(message).status === 'ended' }">
                 <div class="entry-header">
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <polygon points="23 7 16 12 23 17 23 7"></polygon>
                     <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
                   </svg>
                   <span class="entry-title">{{ getClassEntryData(message).title }}</span>
+                  <span v-if="getClassEntryData(message).status === 'ended'" class="status-badge ended">已结束</span>
+                  <span v-else-if="getClassEntryData(message).status === 'active'" class="status-badge active">进行中</span>
                 </div>
                 <div v-if="getClassEntryData(message).description" class="entry-description">
                   {{ getClassEntryData(message).description }}
                 </div>
                 <div class="entry-footer">
                   <span class="entry-duration">预计 {{ getClassEntryData(message).duration }} 分钟</span>
-                  <button class="entry-join-btn" @click="joinClass(getClassEntryData(message).lesson_id)">
+                  <button 
+                    v-if="getClassEntryData(message).status !== 'ended'" 
+                    class="entry-join-btn" 
+                    @click="joinClass(getClassEntryData(message).lesson_id, getClassEntryData(message).status)"
+                  >
                     进入课堂
                   </button>
+                  <span v-else class="ended-text">课堂已结束</span>
                 </div>
               </div>
               <div v-else-if="message.message_type === 'system'" class="system-message">
@@ -73,10 +82,40 @@
                 <span v-if="message.sender_id == currentUserId" class="status">
                   <i v-if="message.pending" class="el-icon-loading"></i>
                   <i v-else-if="message.failed" class="el-icon-warning" style="color: #f56c6c"></i>
-                  <i v-else-if="message.read_by && message.read_by.length > 0" class="el-icon-check read" style="color: #409eff"></i>
+                  <i v-else-if="(message.read_count && message.read_count > 0) || (message.read_by && message.read_by.length > 0)" class="el-icon-check read" style="color: #409eff" :title="`${message.read_count} 人已读`"></i>
                   <i v-else class="el-icon-check"></i>
                 </span>
               </div>
+            </div>
+            
+            <!-- 表情回复显示 -->
+            <div v-if="message.reactions && message.reactions.length > 0" class="message-reactions-display">
+              <button
+                v-for="(reactionItem, idx) in message.reactions"
+                :key="idx"
+                class="reaction-bubble"
+                :class="{ 'my-reaction': reactionItem.i_reacted }"
+                @click="toggleReaction(message, reactionItem.reaction)"
+                :title="getReactionTooltip(reactionItem)"
+              >
+                <span class="reaction-emoji">{{ reactionItem.reaction }}</span>
+                <span class="reaction-count">{{ reactionItem.count }}</span>
+              </button>
+            </div>
+            
+            <!-- ===== Telegram 式频道评论入口 ===== -->
+            <div 
+              v-if="isChannelMessage(message)" 
+              class="comment-bar"
+              @click="openComments(message)"
+            >
+              <svg class="comment-icon" viewBox="0 0 24 24" width="16" height="16">
+                <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12c0 1.54.36 3 .97 4.29L2 22l5.71-.97C9 21.64 10.46 22 12 22c5.52 0 10-4.48 10-10S17.52 2 12 2zm0 18c-1.38 0-2.68-.32-3.85-.89l-.27-.15-2.83.48.48-2.83-.15-.27C4.82 14.68 4.5 13.38 4.5 12 4.5 7.86 7.86 4.5 12 4.5S19.5 7.86 19.5 12 16.14 19.5 12 19.5z"/>
+              </svg>
+              <span v-if="message.comment_count > 0" class="comment-count">
+                {{ message.comment_count }} 条评论
+              </span>
+              <span v-else class="comment-hint">发表评论...</span>
             </div>
           </div>
           
@@ -98,74 +137,165 @@
       <span class="typing-text">{{ typingUsers[0] }} 正在输入...</span>
     </div>
     
-    <!-- 滚动到底部按钮 -->
-    <transition name="fade">
-      <div v-if="showScrollButton" class="scroll-to-bottom" @click="scrollToBottom">
-        <i class="el-icon-arrow-down"></i>
-        <span v-if="unreadCount > 0" class="unread-badge">{{ unreadCount }}</span>
-      </div>
-    </transition>
-    
-    <!-- 右键菜单 -->
-    <transition name="fade">
-      <div v-if="contextMenu.visible" 
-        class="context-menu" 
-        :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }"
-        @click="hideContextMenu"
-      >
-        <div class="menu-item" @click="replyMessage(contextMenu.message)">
-          <i class="el-icon-chat-line-round"></i> 回复
+    <!-- 右键菜单 - Telegram风格完全分离布局 -->
+    <!-- 使用 Teleport 将菜单挂载到 body，彻底解决遮挡问题 -->
+    <teleport to="body">
+      <transition name="telegram-fade">
+        <div v-if="contextMenu.visible" 
+          class="context-menu-container" 
+          :class="{ 'is-reverse': contextMenu.reverseLayout }"
+          :style="{ 
+            top: contextMenu.y + 'px', 
+            left: contextMenu.x + 'px'
+          }"
+          @click.stop
+        >
+          <!-- 表情栏：独立的圆角背景 -->
+          <div class="tg-reaction-bar">
+            <span 
+              v-for="emoji in quickReactions" 
+              :key="emoji" 
+              class="tg-emoji-item"
+              @click="addReaction(contextMenu.message, emoji)"
+            >
+              {{ emoji }}
+            </span>
+            <button 
+              class="tg-expand-btn" 
+              :class="{ 'is-active': showMoreMenu }"
+              @click.stop="showMoreReactions"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m6 9 6 6 6-6"/>
+              </svg>
+            </button>
+
+            <!-- 更多表情面板 - 从快捷栏内部展开覆盖 -->
+            <transition name="tg-pop-in">
+              <div v-if="showMoreMenu" class="tg-full-emoji-panel">
+                <div class="emoji-grid">
+                  <span 
+                    v-for="emoji in allReactions" 
+                    :key="emoji" 
+                    class="tg-emoji-item-large"
+                    @click="addReaction(contextMenu.message, emoji)"
+                    :title="emoji"
+                  >
+                    {{ emoji }}
+                  </span>
+                </div>
+              </div>
+            </transition>
+          </div>
+
+          <!-- 功能菜单：当表情面板打开时隐藏 -->
+          <div v-if="!showMoreMenu" class="tg-menu-list">
+            <div class="tg-menu-item" @click="replyMessage(contextMenu.message)">
+              <i class="el-icon-chat-line-round"></i>
+              <span>回复</span>
+            </div>
+            <div class="tg-menu-item" @click="copyMessage(contextMenu.message)">
+              <i class="el-icon-document-copy"></i>
+              <span>复制文本</span>
+            </div>
+            <div v-if="['teacher', 'admin'].includes(userRole)" 
+              class="tg-menu-item" @click="pinMessage(contextMenu.message)">
+              <i class="el-icon-top"></i>
+              <span>置顶消息</span>
+            </div>
+            <div v-if="contextMenu.message?.sender_id == currentUserId" 
+              class="tg-menu-item" @click="editMessage(contextMenu.message)">
+              <i class="el-icon-edit"></i>
+              <span>编辑</span>
+            </div>
+            <div v-if="contextMenu.message?.sender_id == currentUserId" 
+              class="tg-menu-item tg-danger" @click="deleteMessage(contextMenu.message)">
+              <i class="el-icon-delete"></i>
+              <span>删除消息</span>
+            </div>
+          </div>
         </div>
-        <div class="menu-item" @click="copyMessage(contextMenu.message)">
-          <i class="el-icon-document-copy"></i> 复制
-        </div>
-        <div v-if="contextMenu.message?.sender_id == currentUserId" 
-          class="menu-item" @click="editMessage(contextMenu.message)">
-          <i class="el-icon-edit"></i> 编辑
-        </div>
-        <div v-if="contextMenu.message?.sender_id == currentUserId" 
-          class="menu-item danger" @click="deleteMessage(contextMenu.message)">
-          <i class="el-icon-delete"></i> 删除
-        </div>
-      </div>
-    </transition>
+      </transition>
+    </teleport>
   </div>
 </template>
 
 <script setup>
-import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, watch, nextTick, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import api from '../api'
+import { 
+  formatTime, 
+  formatFullTime, 
+  formatDateDivider,
+  shouldShowDateDivider
+} from '@/utils/timeUtils'
 
 const router = useRouter()
 
 const props = defineProps({
   conversationId: Number,
-  messages: Array
+  messages: Array,
+  conversationSubtype: String  // 'channel' or null
 })
 
-const emit = defineEmits(['load-more', 'reply', 'edit', 'delete'])
+const emit = defineEmits(['load-more', 'reply', 'edit', 'delete', 'pin', 'reaction-changed', 'open-comments'])
 
 const messageContainer = ref(null)
+const lastMsgRef = ref(null)
 const loading = ref(false)
 const currentUserId = localStorage.getItem('user_id')
+const userRole = localStorage.getItem('user_role')
 const currentUserName = localStorage.getItem('user_name') || localStorage.getItem('real_name') || localStorage.getItem('username')
 const showScrollButton = ref(false)
 const unreadCount = ref(0)
 const typingUsers = ref([])
+// 快捷表情栏（显示6个常用表情）
+const quickReactions = ref(['👍', '❤️', '😂', '😮', '😢', '🙏'])
+
+// 所有支持的表情（包括更多选项）- 扩展到24个
+const allReactions = ref([
+  '👍', '❤️', '😂', '😮', '😢', '🙏',
+  '🔥', '👏', '🎉', '💯', '🤔', '😊',
+  '😍', '🥰', '😭', '😡', '🤩', '😎',
+  '🙌', '✨', '💪', '🎊', '👌', '❤️‍🔥'
+])
+
+// 更多表情菜单的显示状态
+const showMoreMenu = ref(false)
 const contextMenu = ref({
   visible: false,
   x: 0,
   y: 0,
-  message: null
+  message: null,
+  reverseLayout: false // 标记是否需要表情在下，菜单在上
+})
+
+// 格式化未读消息数：超过999显示999+
+const formattedUnreadCount = computed(() => {
+  return unreadCount.value > 999 ? '999+' : unreadCount.value
 })
 
 let isNearBottom = true
 
+// 防抖函数（优化滚动性能）
+const throttle = (fn, delay) => {
+  let timer = null
+  return function(...args) {
+    if (timer) return
+    timer = setTimeout(() => {
+      fn.apply(this, args)
+      timer = null
+    }, delay)
+  }
+}
+
 const handleScroll = () => {
   if (!messageContainer.value) return
   
-  const { scrollTop, scrollHeight, clientHeight } = messageContainer.value
+  const el = messageContainer.value
+  const { scrollTop, scrollHeight, clientHeight } = el
   
   // 检查是否在顶部（加载更多）
   if (scrollTop < 100 && !loading.value) {
@@ -174,62 +304,50 @@ const handleScroll = () => {
     setTimeout(() => loading.value = false, 1000)
   }
   
-  // 检查是否接近底部
-  isNearBottom = scrollHeight - scrollTop - clientHeight < 100
-  showScrollButton.value = !isNearBottom
+  // 精确检测：判断最后一条消息是否被完全遮挡
+  if (lastMsgRef.value) {
+    const lastMsg = lastMsgRef.value
+    // 最后一条消息的底部位置（相对于容器顶部）
+    const lastMsgBottom = lastMsg.offsetTop + lastMsg.offsetHeight
+    // 容器当前可视区域的底部位置
+    const viewPortBottom = scrollTop + clientHeight
+    
+    /**
+     * 核心判定逻辑：
+     * 如果最后一条消息的底部 > 视口底部 + 预留量（5px）
+     * 说明最后一条消息至少有一部分在视口外（被遮挡）
+     */
+    const hasHiddenMessage = lastMsgBottom > (viewPortBottom + 5)
+    
+    // 距离底部很近（50px内）认为在底部
+    isNearBottom = lastMsgBottom - viewPortBottom < 50
+    
+    // 显示按钮：有消息被遮挡时才显示
+    showScrollButton.value = hasHiddenMessage
+  } else {
+    // 降级方案：没有最后一条消息引用时使用原有逻辑
+    const scrollBottom = scrollHeight - scrollTop - clientHeight
+    isNearBottom = scrollBottom < 50
+    showScrollButton.value = scrollBottom > 150
+  }
   
+  // 如果在底部，清空未读数
   if (isNearBottom) {
     unreadCount.value = 0
   }
 }
 
-const shouldShowDateDivider = (message, index) => {
+// 创建防抖版本的滚动处理函数
+const throttledScroll = throttle(handleScroll, 100)
+
+const shouldShowDateDividerLocal = (message, index) => {
   if (index === 0) return true
   
   const prevMessage = props.messages[index - 1]
-  if (!prevMessage) return false
-  
-  const currentDate = new Date(message.created_at)
-  const prevDate = new Date(prevMessage.created_at)
-  
-  // 如果日期不同，显示分隔线
-  return currentDate.toDateString() !== prevDate.toDateString()
+  return shouldShowDateDivider(message, prevMessage)
 }
 
-const formatDateDivider = (timestamp) => {
-  const date = new Date(timestamp)
-  const today = new Date()
-  const yesterday = new Date(today)
-  yesterday.setDate(yesterday.getDate() - 1)
-  
-  if (date.toDateString() === today.toDateString()) {
-    return '今天'
-  } else if (date.toDateString() === yesterday.toDateString()) {
-    return '昨天'
-  } else {
-    const year = date.getFullYear()
-    const month = String(date.getMonth() + 1).padStart(2, '0')
-    const day = String(date.getDate()).padStart(2, '0')
-    return `${year}年${month}月${day}日`
-  }
-}
-
-const formatTime = (timestamp) => {
-  const date = new Date(timestamp)
-  return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-}
-
-const formatFullTime = (timestamp) => {
-  const date = new Date(timestamp)
-  return date.toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
-  })
-}
+// formatTime, formatFullTime, formatDateDivider 函数从 timeUtils 导入，不再在此定义
 
 const getClassEntryData = (message) => {
   try {
@@ -239,17 +357,39 @@ const getClassEntryData = (message) => {
       lesson_id: '',
       title: '在线授课',
       description: '',
-      duration: 45
+      duration: 45,
+      status: 'active'
     }
   }
 }
 
-const joinClass = (lessonId) => {
+const joinClass = async (lessonId, status) => {
+  // 如果状态已标记为结束，阻止进入
+  if (status === 'ended') {
+    ElMessage.warning('课堂已结束，无法进入')
+    return
+  }
+  
+  // 再次验证课堂状态
+  try {
+    const response = await api.get(`/live-class/${lessonId}/check`)
+    if (response.data.status === 'ended') {
+      ElMessage.warning('课堂已结束，无法进入')
+      return
+    }
+  } catch (error) {
+    if (error.response?.status === 403) {
+      ElMessage.error(error.response.data.error || '课堂已结束')
+      return
+    }
+    console.error('检查课堂状态失败:', error)
+  }
+  
   const userRole = localStorage.getItem('user_role')
   if (userRole === 'teacher') {
     router.push(`/teacher/live-class/${lessonId}`)
   } else {
-    router.push(`/student/live-class/${lessonId}`)
+    router.push(`/live-class/${lessonId}`)
   }
 }
 
@@ -260,11 +400,16 @@ const previewImage = (url) => {
 const scrollToBottom = (smooth = true) => {
   nextTick(() => {
     if (messageContainer.value) {
-      messageContainer.value.scrollTo({
-        top: messageContainer.value.scrollHeight,
+      const el = messageContainer.value
+      el.scrollTo({
+        top: el.scrollHeight,
         behavior: smooth ? 'smooth' : 'auto'
       })
+      // 立即清空未读数
       unreadCount.value = 0
+      // 更新底部状态
+      isNearBottom = true
+      showScrollButton.value = false
     }
   })
 }
@@ -278,18 +423,191 @@ const scrollToMessage = (messageId) => {
   }
 }
 
-// 右键菜单
+// 右键菜单 - 智能定位与自动翻转（基于聊天窗口边界）
 const showContextMenu = (event, message) => {
+  event.preventDefault()
+  event.stopPropagation()
+  
+  // 先关闭之前的菜单
+  if (contextMenu.value.visible) {
+    hideContextMenu()
+    // 等待关闭动画完成再打开新的
+    setTimeout(() => {
+      showContextMenu(event, message)
+    }, 200)
+    return
+  }
+  
+  if (!messageContainer.value) return
+  
+  // 获取聊天窗口容器的边界
+  const containerRect = messageContainer.value.getBoundingClientRect()
+  
+  // 动态计算菜单尺寸
+  const reactionBarHeight = 48
+  const gap = 8
+  const menuItemHeight = 36
+  const menuPadding = 6
+  const edgeMargin = 20 // 增加安全边距
+  
+  // 根据消息和权限计算菜单项数量
+  let menuItemsCount = 2
+  if (['teacher', 'admin'].includes(userRole)) menuItemsCount++
+  if (message.sender_id == currentUserId) menuItemsCount += 2
+  
+  const menuListHeight = (menuItemsCount * menuItemHeight) + menuPadding
+  const totalHeight = reactionBarHeight + gap + menuListHeight
+  const totalWidth = 200
+  
+  // 初始坐标
+  let x = event.clientX
+  let y = event.clientY
+  let reverseLayout = false
+  
+  // 水平边界检测 - 确保完全在容器内
+  const maxX = containerRect.right - totalWidth - edgeMargin
+  const minX = containerRect.left + edgeMargin
+  
+  if (x > maxX) {
+    x = maxX
+  }
+  if (x < minX) {
+    x = minX
+  }
+  
+  // 垂直边界检测 - 确保完全在容器内
+  const maxY = containerRect.bottom - totalHeight - edgeMargin
+  const minY = containerRect.top + edgeMargin
+  
+  const spaceBelow = containerRect.bottom - y - edgeMargin
+  const spaceAbove = y - containerRect.top - edgeMargin
+  
+  if (spaceBelow >= totalHeight) {
+    // 下方空间足够
+    reverseLayout = false
+    y = Math.min(y, maxY)
+  } else if (spaceAbove >= totalHeight) {
+    // 上方空间足够
+    reverseLayout = true
+    y = y - totalHeight
+  } else {
+    // 上下都不够，选择空间较大的一侧
+    if (spaceAbove > spaceBelow) {
+      reverseLayout = true
+      y = minY
+    } else {
+      reverseLayout = false
+      y = Math.min(y, maxY)
+    }
+  }
+  
+  // 最终边界检查
+  if (y < minY) y = minY
+  if (y > maxY) y = maxY
+  
+  // 显示菜单
   contextMenu.value = {
     visible: true,
-    x: event.clientX,
-    y: event.clientY,
-    message
+    x,
+    y,
+    message,
+    reverseLayout
   }
+  
+  // 延迟绑定关闭事件
+  nextTick(() => {
+    const closeHandler = (e) => {
+      // 如果点击的是菜单内部，不关闭
+      if (e.target.closest('.context-menu-container')) {
+        return
+      }
+      hideContextMenu()
+      document.removeEventListener('click', closeHandler, true)
+    }
+    // 使用捕获阶段监听
+    document.addEventListener('click', closeHandler, true)
+  })
 }
 
 const hideContextMenu = () => {
   contextMenu.value.visible = false
+  showMoreMenu.value = false
+}
+
+const showMoreReactions = () => {
+  // 切换更多表情菜单的显示状态
+  showMoreMenu.value = !showMoreMenu.value
+}
+
+const addReaction = async (message, emoji) => {
+  try {
+    // 确保emoji是字符串格式而不是Unicode转义
+    const emojiString = String(emoji)
+    console.log('添加表情:', emojiString)
+    console.log('表情长度:', emojiString.length)
+    console.log('表情 Unicode:', Array.from(emojiString).map(c => '0x' + c.charCodeAt(0).toString(16)))
+    console.log('表情类型:', typeof emojiString)
+    
+    // 检测是否为问号
+    if (emojiString === '??' || emojiString.includes('?')) {
+      console.error('检测到损坏的表情数据:', emojiString)
+      ElMessage.error('表情数据异常，请刷新页面后重试')
+      return
+    }
+    
+    const response = await api.post(`/chat/messages/${message.id}/reactions`, {
+      reaction: emojiString
+    })
+    
+    // 立即更新本地消息的表情数据
+    if (response.data.reactions) {
+      message.reactions = response.data.reactions
+      console.log('已更新本地表情数据:', message.reactions)
+    }
+    
+    ElMessage.success('已添加表情回复')
+    emit('reaction-changed')
+  } catch (error) {
+    console.error('添加表情失败:', error)
+    ElMessage.error(error.response?.data?.error || '添加表情回复失败')
+  }
+  
+  // 关闭更多表情菜单和右键菜单
+  showMoreMenu.value = false
+  hideContextMenu()
+}
+
+const toggleReaction = async (message, emoji) => {
+  try {
+    const emojiString = String(emoji)
+    const response = await api.post(`/chat/messages/${message.id}/reactions`, {
+      reaction: emojiString
+    })
+    
+    // 立即更新本地消息的表情数据
+    if (response.data.reactions) {
+      message.reactions = response.data.reactions
+      console.log('已更新本地表情数据:', message.reactions)
+    }
+    
+    emit('reaction-changed')
+  } catch (error) {
+    console.error('表情操作失败:', error)
+    ElMessage.error('操作失败')
+  }
+}
+
+const getReactionTooltip = (reaction) => {
+  if (!reaction) return ''
+  
+  // 处理用户列表显示
+  if (reaction.users && Array.isArray(reaction.users) && reaction.users.length > 0) {
+    return reaction.users.join(', ')
+  }
+  
+  // 显示数量
+  const count = reaction.count || 0
+  return `${count} 人回复`
 }
 
 const replyMessage = (message) => {
@@ -302,6 +620,11 @@ const copyMessage = (message) => {
     navigator.clipboard.writeText(message.content)
     ElMessage.success('已复制到剪贴板')
   }
+  hideContextMenu()
+}
+
+const pinMessage = (message) => {
+  emit('pin', message)
   hideContextMenu()
 }
 
@@ -324,48 +647,89 @@ const deleteMessage = async (message) => {
   }
 }
 
-// 全局点击隐藏右键菜单
+const handleReactionChanged = (data) => {
+  // 通知父组件更新消息的reactions
+  emit('reaction-changed', data)
+}
+
+// 生命周期钩子
 onMounted(() => {
-  document.addEventListener('click', hideContextMenu)
-  document.addEventListener('scroll', hideContextMenu)
+  // 监听滚动事件（使用防抖版本）
+  const messageList = messageContainer.value
+  if (messageList) {
+    messageList.addEventListener('scroll', throttledScroll)
+    // 滚动时隐藏右键菜单
+    messageList.addEventListener('scroll', hideContextMenu)
+  }
+  // 初始化执行一次，检查初始状态
+  handleScroll()
 })
 
 onUnmounted(() => {
-  document.removeEventListener('click', hideContextMenu)
-  document.removeEventListener('scroll', hideContextMenu)
+  const messageList = messageContainer.value
+  if (messageList) {
+    messageList.removeEventListener('scroll', throttledScroll)
+    messageList.removeEventListener('scroll', hideContextMenu)
+  }
 })
 
 // 监听消息变化
 watch(() => props.messages.length, (newLen, oldLen) => {
   if (newLen > oldLen) {
-    // 新消息
+    // 有新消息进来
+    const newMessage = props.messages[props.messages.length - 1]
+    
     if (isNearBottom) {
-      scrollToBottom()
+      // 用户在底部：自动滚动到底部，不增加未读数
+      nextTick(() => {
+        scrollToBottom(false) // 使用非平滑滚动，更快响应
+      })
     } else {
-      // 不在底部时，增加未读数
-      const newMessage = props.messages[props.messages.length - 1]
+      // 用户不在底部：增加未读数（排除自己发送的消息）
       if (newMessage && newMessage.sender_id != currentUserId) {
         unreadCount.value++
       }
     }
   }
+  
+  // 消息数量变化后，重新检测按钮状态（等待DOM更新）
+  nextTick(() => {
+    handleScroll()
+  })
 })
 
-// 暴露方法给父组件
+// ===== Telegram 式频道评论功能 =====
+const isChannelMessage = (message) => {
+  // 判断是否为频道消息（没有 root_message_id 且对话是频道类型）
+  return props.conversationSubtype === 'channel' && !message.root_message_id
+}
+
+const openComments = (message) => {
+  // 触发事件，由父组件处理（切换到讨论模式）
+  emit('open-comments', message)
+}
+
+// 暴露方法和状态给父组件
 defineExpose({
   scrollToBottom,
-  setTypingUsers: (users) => { typingUsers.value = users }
+  scrollToMessage,
+  setTypingUsers: (users) => { typingUsers.value = users },
+  showScrollButton,
+  unreadCount,
+  formattedUnreadCount
 })
 </script>
 
 <style scoped>
 .message-list {
   flex: 1;
+  height: 100%;
   overflow-y: auto;
   padding: 20px;
   padding-bottom: 100px;
   background: linear-gradient(to bottom, #f0f2f5 0%, #e8eaed 100%);
   position: relative;
+  /* 确保滚动按钮相对于这个容器定位 */
 }
 
 .loading {
@@ -404,6 +768,7 @@ defineExpose({
   max-width: 65%;
   align-items: flex-end;
   animation: messageSlideIn 0.2s ease-out;
+  margin-bottom: 16px; /* 增加消息间距 */
 }
 
 @keyframes messageSlideIn {
@@ -461,6 +826,7 @@ defineExpose({
   flex-direction: column;
   gap: 2px;
   max-width: 100%;
+  position: relative; /* 为表情回复提供定位基准 */
 }
 
 .sender-name {
@@ -519,7 +885,7 @@ defineExpose({
   border-radius: 18px;
   word-wrap: break-word;
   transition: all 0.2s;
-  position: relative;
+  position: relative; /* 为绝对定位的子元素提供基准 */
 }
 
 .message-item.received .message-bubble {
@@ -577,11 +943,18 @@ defineExpose({
   min-width: 280px;
 }
 
+/* 已结束的课堂样式 */
+.live-class-entry.class-ended {
+  background: linear-gradient(135deg, #9ca3af 0%, #6b7280 100%);
+  opacity: 0.8;
+}
+
 .entry-header {
   display: flex;
   align-items: center;
   gap: 12px;
   margin-bottom: 8px;
+  flex-wrap: wrap;
 }
 
 .entry-header svg {
@@ -591,6 +964,28 @@ defineExpose({
 .entry-title {
   font-size: 16px;
   font-weight: 600;
+  flex: 1;
+}
+
+/* 状态标签 */
+.status-badge {
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.status-badge.active {
+  background: rgba(16, 185, 129, 0.2);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+
+.status-badge.ended {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.4);
 }
 
 .entry-description {
@@ -633,6 +1028,13 @@ defineExpose({
   transform: translateY(0);
 }
 
+/* 已结束文本 */
+.ended-text {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 500;
+}
+
 /* 消息元信息 */
 .message-meta {
   display: flex;
@@ -662,6 +1064,66 @@ defineExpose({
 
 .status .read {
   font-weight: bold;
+}
+
+/* 表情回复显示 */
+.message-reactions-display {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.reaction-bubble {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.05);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 14px;
+  outline: none; /* 移除焦点轮廓 */
+  user-select: none; /* 防止选中 */
+}
+
+.reaction-bubble:hover {
+  background: rgba(0, 0, 0, 0.1);
+  transform: scale(1.05);
+}
+
+.reaction-bubble.my-reaction {
+  background: rgba(64, 158, 255, 0.15);
+  border-color: rgba(64, 158, 255, 0.3);
+}
+
+.reaction-emoji {
+  font-size: 16px;
+  line-height: 1;
+  /* 优先使用各平台原生的表情字体 */
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", 
+               "Segoe UI Symbol", "Android Emoji", "EmojiSymbols", sans-serif !important;
+  display: inline-block;
+  vertical-align: middle;
+  /* 确保字符不被压缩 */
+  font-variant-numeric: tabular-nums;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.reaction-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: #666;
+  min-width: 12px;
+  text-align: center;
+}
+
+.my-reaction .reaction-count {
+  color: #409eff;
 }
 
 /* 正在输入指示器 */
@@ -722,84 +1184,283 @@ defineExpose({
   color: #666;
 }
 
-/* 滚动到底部按钮 */
-.scroll-to-bottom {
-  position: absolute;
-  bottom: 20px;
-  right: 20px;
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #409eff 0%, #66b1ff 100%);
-  color: white;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.4);
-  transition: all 0.3s;
-  z-index: 10;
-}
-
-.scroll-to-bottom:hover {
-  transform: scale(1.1);
-  box-shadow: 0 6px 16px rgba(64, 158, 255, 0.5);
-}
-
-.scroll-to-bottom .unread-badge {
-  position: absolute;
-  top: -4px;
-  right: -4px;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 6px;
-  background: #f56c6c;
-  color: white;
-  border-radius: 10px;
-  font-size: 11px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 600;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-}
-
-/* 右键菜单 */
-.context-menu {
+/* 右键菜单 - 外层容器 */
+.context-menu-container {
   position: fixed;
-  background: white;
-  border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
-  padding: 6px 0;
-  min-width: 140px;
-  z-index: 1000;
-  animation: fadeIn 0.15s;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  pointer-events: none;
+  /* 移除动画，减少闪烁 */
+  filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.25)) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.12));
 }
 
-.menu-item {
-  padding: 10px 16px;
+/* 反向布局：当上方空间不足时，表情在下 */
+.context-menu-container.is-reverse {
+  flex-direction: column-reverse;
+}
+
+/* 表情栏：独立的背景和圆角 */
+.tg-reaction-bar {
+  position: relative; /* 为内部面板提供定位基准 */
+  background: rgba(255, 255, 255, 0.98);
+  backdrop-filter: blur(15px) saturate(180%); /* Telegram 的毛玻璃感 */
+  -webkit-backdrop-filter: blur(15px) saturate(180%);
+  border-radius: 14px;
+  padding: 6px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  min-width: 200px;
+  pointer-events: auto; /* 子块响应点击 */
+  border: 1px solid rgba(64, 158, 255, 0.2);
+  z-index: 10; /* 确保在功能菜单上方 */
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  /* box-shadow 移到父容器的 drop-shadow */
+}
+
+/* 表情项 */
+.tg-emoji-item {
+  font-size: 20px; /* 缩小表情尺寸 */
+  cursor: pointer;
+  transition: all 0.22s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  user-select: none;
+  /* 优先使用各平台原生的表情字体 */
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", 
+               "Segoe UI Symbol", "Android Emoji", "EmojiSymbols", sans-serif !important;
+  padding: 3px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  min-height: 28px;
+  position: relative;
+  /* 确保字符不被压缩 */
+  font-variant-numeric: tabular-nums;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.tg-emoji-item:hover {
+  transform: scale(1.35) translateY(-2px);
+  background: rgba(64, 158, 255, 0.15);
+}
+
+.tg-emoji-item:active {
+  transform: scale(1.2) translateY(-1px);
+  background: rgba(64, 158, 255, 0.25);
+}
+
+/* 下拉按钮 - Telegram 风格圆形按钮 */
+.tg-expand-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%; /* 正圆形 */
+  border: none;
+  background: transparent;
+  color: rgba(96, 98, 102, 0.6);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-left: 2px;
+  outline: none;
+  padding: 0;
+}
+
+/* 鼠标悬停时的浅蓝色圆形背景 */
+.tg-expand-btn:hover {
+  background-color: rgba(64, 158, 255, 0.1);
+  color: #409eff;
+}
+
+/* 当菜单打开时，按钮保持高亮并旋转箭头 */
+.tg-expand-btn.is-active {
+  background-color: rgba(64, 158, 255, 0.15);
+  color: #409eff;
+  transform: rotate(180deg); /* 箭头反转 */
+}
+
+.tg-expand-btn svg {
+  display: block;
+}
+
+/* 完整表情面板 - 从快捷栏内部展开覆盖 */
+.tg-full-emoji-panel {
+  position: absolute;
+  top: 0;   /* 从快捷栏顶部开始覆盖 */
+  left: 0;
+  right: 0;
+  background: rgba(255, 255, 255, 0.98); /* 稍微不透明一点，覆盖效果更好 */
+  backdrop-filter: blur(15px) saturate(180%);
+  -webkit-backdrop-filter: blur(15px) saturate(180%);
+  border-radius: 14px;
+  z-index: 100; /* 足够高，遮盖下方的功能菜单 */
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(64, 158, 255, 0.2);
+  pointer-events: auto;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+/* 隐藏滚动条但保留功能 */
+.tg-full-emoji-panel::-webkit-scrollbar {
+  width: 4px;
+}
+
+.tg-full-emoji-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.tg-full-emoji-panel::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+}
+
+/* 表情网格布局 */
+.emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 4px;
+  padding: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  grid-auto-rows: minmax(auto, max-content);
+}
+
+.tg-emoji-item-large {
+  font-size: 20px;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  transition: all 0.15s cubic-bezier(0.2, 0, 0.2, 1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 1;
+  box-sizing: border-box;
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", 
+               "Segoe UI Symbol", "Android Emoji", "EmojiSymbols", sans-serif !important;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.tg-emoji-item-large:hover {
+  background: rgba(64, 158, 255, 0.15);
+  transform: scale(1.2);
+}
+
+/* Telegram 风格的轻盈弹出动画 */
+.tg-pop-in-enter-active {
+  transition: all 0.2s cubic-bezier(0.2, 0, 0.2, 1);
+}
+
+.tg-pop-in-leave-active {
+  transition: all 0.15s cubic-bezier(0.4, 0, 1, 1);
+}
+
+.tg-pop-in-enter-from {
+  opacity: 0;
+  transform: scale(0.95) translateY(8px);
+}
+
+.tg-pop-in-leave-to {
+  opacity: 0;
+  transform: scale(0.98) translateY(-4px);
+}
+
+/* 功能菜单列表：独立的背景和圆角 */
+.tg-menu-list {
+  background: rgba(255, 255, 255, 0.98);
+  backdrop-filter: blur(15px) saturate(180%); /* Telegram 的毛玻璃感 */
+  -webkit-backdrop-filter: blur(15px) saturate(180%);
+  border-radius: 10px;
+  padding: 3px 0;
+  min-width: 140px;
+  max-width: 160px;
+  pointer-events: auto; /* 子块响应点击 */
+  border: 1px solid rgba(64, 158, 255, 0.2);
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  /* box-shadow 移到父容器的 drop-shadow */
+}
+
+/* 菜单项 */
+.tg-menu-item {
+  padding: 8px 12px;
   cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  font-size: 13px;
+  color: #303133;
+  transition: all 0.18s;
+  position: relative;
+  user-select: none;
+  min-height: 36px; /* 确保与动态计算的高度一致 */
+  box-sizing: border-box;
+}
+
+.tg-menu-item:hover {
+  background: rgba(64, 158, 255, 0.1);
+  color: #409eff;
+}
+
+.tg-menu-item:active {
+  background: rgba(64, 158, 255, 0.2);
+  transform: scale(0.98);
+}
+
+.tg-menu-item i {
   font-size: 14px;
-  color: #333;
-  transition: background 0.2s;
+  width: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.85;
 }
 
-.menu-item:hover {
-  background: #f5f5f5;
+.tg-menu-item span {
+  flex: 1;
 }
 
-.menu-item.danger {
-  color: #f56c6c;
+/* 危险操作 */
+.tg-menu-item.tg-danger {
+  color: #ff6b6b;
 }
 
-.menu-item.danger:hover {
-  background: #fef0f0;
+.tg-menu-item.tg-danger:hover {
+  background: rgba(255, 107, 107, 0.15);
 }
 
-/* 动画 */
+.tg-menu-item.tg-danger i {
+  color: #ff6b6b;
+  opacity: 1;
+}
+
+/* 简化的过渡动画 */
+.telegram-fade-enter-active {
+  transition: opacity 0.15s ease;
+}
+
+.telegram-fade-leave-active {
+  transition: opacity 0.1s ease;
+}
+
+.telegram-fade-enter-from,
+.telegram-fade-leave-to {
+  opacity: 0;
+}
+
+/* 原有动画保留 */
 .fade-enter-active, .fade-leave-active {
   transition: opacity 0.2s;
 }
@@ -808,15 +1469,33 @@ defineExpose({
   opacity: 0;
 }
 
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
+/* 评论栏样式 */
+.comment-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.05);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 12px;
+  color: #409eff;
+  user-select: none;
+}
+
+.comment-bar:hover {
+  background: rgba(64, 158, 255, 0.1);
+  border-color: rgba(64, 158, 255, 0.2);
+  transform: scale(1.02);
+}
+
+.comment-icon {
+  fill: #409eff;
+  flex-shrink: 0;
+  opacity: 0.8;
 }
 
 /* 滚动条样式 */

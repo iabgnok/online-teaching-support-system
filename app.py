@@ -33,6 +33,10 @@ from models import (
 app = Flask(__name__)
 app.config.from_object(DevelopmentConfig)
 
+# ==================== JSON 配置（支持 Emoji）====================
+app.config['JSON_AS_ASCII'] = False  # 确保 JSON 输出不转义 Unicode 字符（Emoji）
+app.json.ensure_ascii = False  # Flask 2.2+ 的新配置方式
+
 # ==================== SocketIO 初始化 ====================
 socketio.init_app(app, cors_allowed_origins="*", async_mode='eventlet')
 CORS(app, supports_credentials=True)
@@ -50,6 +54,7 @@ from api.v1.grades import grades_bp
 from api.v1.admin import admin_bp
 from api.v1.forum_management import forum_mgmt_bp
 from api.v1.live_class import live_class_bp
+from api.v1.chat_enhanced import api_enhanced
 
 app.register_blueprint(api_v1)
 app.register_blueprint(classes_bp, url_prefix='/api/v1/classes')
@@ -59,6 +64,7 @@ app.register_blueprint(grades_bp)
 app.register_blueprint(admin_bp, url_prefix='/api/v1/admin')
 app.register_blueprint(forum_mgmt_bp)
 app.register_blueprint(live_class_bp, url_prefix='/api/v1/live-class')
+app.register_blueprint(api_enhanced, url_prefix='/api/v1/chat')
 
 # ==================== 扩展初始化 ====================
 db.init_app(app)
