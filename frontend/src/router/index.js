@@ -38,15 +38,15 @@ import GradeStatistics from '../views/teacher/GradeStatistics.vue'
 
 import TeachingPlan from '../views/teacher/TeachingPlan.vue'
 
-import TeacherLiveClass from '../views/teacher/LiveClass.vue'
+// Unified Online Class View
+
+import OnlineClass from '../views/OnlineClass.vue'
 
 
 
 // Student Grade View
 
 import MyGrades from '../views/student/MyGrades.vue'
-
-import StudentLiveClass from '../views/student/LiveClass.vue'
 
 import ActiveLiveClass from '../views/ActiveLiveClass.vue'
 
@@ -94,7 +94,7 @@ const routes = [
 
   { path: '/live-class/active', component: ActiveLiveClass },
 
-  { path: '/live-class/:lessonId', component: StudentLiveClass, props: true },
+  { path: '/live-class/:lessonId', component: OnlineClass, props: true },
 
   { path: '/forum', component: Forum },
 
@@ -120,7 +120,7 @@ const routes = [
 
           { path: 'teaching-plan', component: TeachingPlan },
 
-          { path: 'live-class/:lessonId', component: TeacherLiveClass, props: true },
+          { path: 'live-class/:lessonId', component: OnlineClass, props: true },
 
           { path: 'class/:id', component: TeacherClassDetail },
 
