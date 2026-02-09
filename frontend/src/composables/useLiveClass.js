@@ -34,8 +34,8 @@ export function useLiveClass(options = {}) {
   
   // 用户角色
   const userRole = ref(null)
-  const userId = ref(parseInt(localStorage.getItem('user_id')))
-  const userName = ref(localStorage.getItem('real_name') || localStorage.getItem('username') || '')
+  const userId = ref(parseInt(sessionStorage.getItem('user_id')))
+  const userName = ref(sessionStorage.getItem('real_name') || sessionStorage.getItem('username') || '')
   
   // Socket连接
   const socket = ref(null)

@@ -464,8 +464,8 @@ export default {
       const tempMessage = {
         id: `temp_${Date.now()}`,
         conversation_id: conversationId,
-        sender_id: parseInt(localStorage.getItem('user_id')),
-        sender_name: localStorage.getItem('real_name') || localStorage.getItem('username') || '我',
+        sender_id: parseInt(sessionStorage.getItem('user_id')),
+        sender_name: sessionStorage.getItem('real_name') || sessionStorage.getItem('username') || '我',
         content: messageData.content,
         message_type: messageData.message_type || 'text',
         created_at: new Date().toISOString(),

@@ -1799,16 +1799,61 @@ def send_chat_message(conversation_id):
 
     db.session.commit()
 
-    
+    # 构建返回的消息对象
+    msg_data = {
+        'id': message.id,
+        'sender_id': message.sender_id,
+        'sender_name': message.sender.real_name if message.sender else "Unknown",
+        'sender_avatar': None,  # TODO: 添加头像
+        'content': message.content,
+        'message_type': message.message_type,
+        'media_url': message.media_url,
+        'file_name': message.file_name,
+        'file_size': message.file_size,
+        'reply_to_id': message.reply_to_id,
+        'forward_from_id': message.forward_from_id,
+        'is_edited': message.is_edited,
+        'created_at': message.created_at.isoformat(),
+        'edited_at': message.edited_at.isoformat() if message.edited_at else None,
+        'extra_data': message.extra_data,
+        'root_message_id': message.root_message_id,
+        'parent_message_id': message.parent_message_id,
+        'comment_count': message.comment_count
+    }
+
+    # 发送者可以看到已读计数
+    read_count = MessageStatus.query.filter_by(message_id=message.id, status='read').count()
+    msg_data['read_count'] = read_count
+
+    # 如果有回复，添加回复信息
+    if message.reply_to_id:
+        reply_to = IMMessage.query.get(message.reply_to_id)
+        if reply_to:
+            msg_data['reply_to'] = {
+                'id': reply_to.id,
+                'sender_name': reply_to.sender.real_name if reply_to.sender else "Unknown",
+                'content': reply_to.content[:50] + '...' if len(reply_to.content) > 50 else reply_to.content
+            }
+
+    # 添加表情回复
+    reactions = MessageReaction.query.filter_by(message_id=message.id).all()
+    if reactions:
+        reaction_summary = {}
+        for reaction in reactions:
+            key = reaction.reaction
+            if key not in reaction_summary:
+                reaction_summary[key] = {'count': 0, 'i_reacted': False}
+            reaction_summary[key]['count'] += 1
+            if reaction.user_id == user_id:
+                reaction_summary[key]['i_reacted'] = True
+        
+        msg_data['reactions'] = [
+            {'reaction': k, 'count': v['count'], 'i_reacted': v['i_reacted']}
+            for k, v in reaction_summary.items()
+        ]
 
     return jsonify({
-
-        'id': message.id,
-
-        'created_at': message.created_at.isoformat(),
-
-        'message': '消息已发送'
-
+        'message': msg_data
     }), 201
 
 

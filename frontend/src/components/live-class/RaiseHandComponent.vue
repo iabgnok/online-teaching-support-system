@@ -141,7 +141,7 @@ export default {
   },
   computed: {
     userRole() {
-      return localStorage.getItem('user_role')
+      return sessionStorage.getItem('user_role')
     },
     isStudent() {
       return this.userRole === 'student'

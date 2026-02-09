@@ -251,9 +251,9 @@ const emit = defineEmits(['load-more', 'reply', 'edit', 'delete', 'pin', 'reacti
 const messageContainer = ref(null)
 const loading = ref(false)
 const lastMsgRef = ref(null)
-const currentUserId = localStorage.getItem('user_id')
-const userRole = localStorage.getItem('user_role')
-const currentUserName = localStorage.getItem('user_name') || localStorage.getItem('real_name') || localStorage.getItem('username')
+const currentUserId = sessionStorage.getItem('user_id')
+const userRole = sessionStorage.getItem('user_role')
+const currentUserName = sessionStorage.getItem('user_name') || sessionStorage.getItem('real_name') || sessionStorage.getItem('username')
 const showScrollButton = ref(false)
 watch(showScrollButton, (val) => emit('scroll-button-change', val))
 const unreadCount = ref(0)
@@ -397,7 +397,7 @@ const joinClass = async (lessonId, status) => {
     console.error('检查课堂状态失败:', error)
   }
   
-  const userRole = localStorage.getItem('user_role')
+  const userRole = sessionStorage.getItem('user_role')
   if (userRole === 'teacher') {
     router.push(`/teacher/live-class/${lessonId}`)
   } else {

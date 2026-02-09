@@ -107,7 +107,7 @@ const emit = defineEmits(['search', 'show-info'])
 
 const startingClass = ref(false)
 const activeClassInfo = ref(null)
-const userRole = ref(localStorage.getItem('user_role'))
+const userRole = ref(sessionStorage.getItem('user_role'))
 const showClassSettings = ref(false)
 
 // 判断是否可以开始授课（班级群且是教师）

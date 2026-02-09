@@ -15,6 +15,15 @@
       <button class="back-btn" @click="exitClass">返回</button>
     </div>
     
+    <!-- 组件错误状态 -->
+    <div v-else-if="componentError" class="error-overlay">
+      <div class="error-icon">⚠️</div>
+      <h3>组件错误</h3>
+      <p>{{ componentError }}</p>
+      <button class="retry-btn" @click="retryComponent">重试</button>
+      <button class="back-btn" @click="exitClass">返回</button>
+    </div>
+    
     <!-- 主内容 -->
     <template v-else>
       <!-- 顶部工具栏 -->
@@ -62,7 +71,6 @@
           @start-attendance="handleStartAttendance"
           @publish-task="handlePublishTask"
           @share-board="handleShareBoard"
-          @raise-hand="handleRaiseHand"
         />
       </div>
       
@@ -108,63 +116,62 @@ export default {
     ParticipantsPanel
   },
   setup() {
-    // 使用 composable
-    const {
-      lessonId,
-      lessonInfo,
-      loading,
-      error,
-      userRole,
-      socket,
-      connected,
-      reconnecting,
-      participants,
-      onlineCount,
-      classroomStatus,
-      duration,
-      formattedDuration,
-      whiteboardReadonly,
-      isScreenSharing,
-      screenShareStream,
-      discussionConversationId,
-      classGroupConversationId,
-      isTeacher,
-      isStudent,
-      isLive,
-      isEnded,
-      loadLessonInfo,
-      exitClass,
-      startClass,
-      endClass,
-      startAttendance,
-      publishTask,
-      startScreenShare,
-      stopScreenShare,
-      raiseHand
-    } = useLiveClass()
+    // 错误处理
+    const componentError = ref(null)
     
-    // ========== Refs ==========
-    const whiteboardRef = ref(null)
-    const chatRef = ref(null)
-    const screenShareVideo = ref(null)
-    
-    // ========== State ==========
-    const showParticipants = ref(false)
-    
-    // ========== Provide ==========
-    provide('socket', socket)
-    provide('lessonId', lessonId)
-    provide('userRole', userRole)
+    try {
+      // 使用 composable
+      const {
+        lessonId,
+        lessonInfo,
+        loading,
+        error,
+        userRole,
+        socket,
+        connected,
+        reconnecting,
+        participants,
+        onlineCount,
+        classroomStatus,
+        duration,
+        formattedDuration,
+        whiteboardReadonly,
+        isScreenSharing,
+        screenShareStream,
+        discussionConversationId,
+        classGroupConversationId,
+        isTeacher,
+        isStudent,
+        isLive,
+        isEnded,
+        loadLessonInfo,
+        exitClass,
+        startClass,
+        endClass,
+        startAttendance,
+        publishTask,
+        startScreenShare,
+        stopScreenShare,
+        raiseHand
+      } = useLiveClass()
+      
+      // ========== Refs ==========
+      const whiteboardRef = ref(null)
+      const chatRef = ref(null)
+      const screenShareVideo = ref(null)
+      
+      // ========== State ==========
+      const showParticipants = ref(false)
+      
+      // ========== Provide ==========
+      provide('socket', socket)
+      provide('lessonId', lessonId)
+      provide('userRole', userRole)
     
     // ========== Handlers ==========
     const handleStartClass = async () => {
       try {
         await startClass()
-      } catch (err) {
-        alert('开始课堂失败：' + (err.message || '请重试'))
-      }
-    }
-    
     const handleExit = async () => {
       if (isTeacher.value && isLive.value) {
         const confirmEnd = confirm('课堂正在进行中，是否结束课堂并退出？')
@@ -214,10 +221,6 @@ export default {
       }
     }
     
-    const handleRaiseHand = (raised) => {
-      raiseHand(raised)
-    }
-    
     const handleAllowSpeak = (student) => {
       socket.value?.emit('classroom:allow_speak', {
         lesson_id: lessonId.value,
@@ -256,6 +259,9 @@ export default {
     })
     
     return {
+      // Error handling
+      componentError,
+      
       // Refs
       whiteboardRef,
       chatRef,
@@ -297,12 +303,27 @@ export default {
       handlePublishTask,
       handleStartQuiz,
       handleShareBoard,
-      handleRaiseHand,
       handleAllowSpeak,
       handleFocusStudent,
       handleAnswerStudent,
       handleDismissHand,
-      handleChatCollapse
+      handleChatCollapse,
+      retryComponent: () => {
+        componentError.value = null
+        // 重新加载组件逻辑
+        loadLessonInfo()
+      }
+    }
+    } catch (err) {
+      console.error('LiveClassRoom setup error:', err)
+      componentError.value = err.message || '组件初始化失败'
+      return {
+        componentError,
+        retryComponent: () => {
+          componentError.value = null
+          // 重新加载组件逻辑
+        }
+      }
     }
   }
 }

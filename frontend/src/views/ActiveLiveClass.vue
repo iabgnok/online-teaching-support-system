@@ -78,7 +78,7 @@ export default {
     return {
       loading: true,
       activeClasses: [],
-      userRole: localStorage.getItem('user_role'),
+      userRole: sessionStorage.getItem('user_role'),
       showStartClassDialog: false,
       selectedClassId: '',
       classTitle: '',

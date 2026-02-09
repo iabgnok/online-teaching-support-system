@@ -42,12 +42,12 @@ import { eventBus } from './utils/eventBus'
 
 const router = useRouter()
 const route = useRoute()
-const userRole = ref(localStorage.getItem('user_role') || 'student')
+const userRole = ref(sessionStorage.getItem('user_role') || 'student')
 const unreadCount = ref(0)
 
 // 监听路由变化，实时更新用户角色
 watch(() => route.path, () => {
-  const storedRole = localStorage.getItem('user_role')
+  const storedRole = sessionStorage.getItem('user_role')
   if (storedRole) {
     userRole.value = storedRole
   }
@@ -57,8 +57,8 @@ watch(() => route.path, () => {
 const fetchUnreadCount = async () => {
   try {
     // 检查是否已登录
-    const token = localStorage.getItem('user_token')
-    const userId = localStorage.getItem('user_id')
+    const token = sessionStorage.getItem('user_token')
+    const userId = sessionStorage.getItem('user_id')
     
     // 如果未登录或在登录页，不执行请求
     if (!token || !userId || route.path === '/login') {

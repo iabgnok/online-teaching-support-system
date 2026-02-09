@@ -97,12 +97,12 @@ export default {
         const token = res.data.token
 
         // Store user data for global access
-        localStorage.setItem('user_token', token)
-        localStorage.setItem('user_role', user.role)
-        localStorage.setItem('user_id', user.id)
-        localStorage.setItem('user_name', user.real_name || user.username)
-        localStorage.setItem('username', user.username)
-        localStorage.setItem('real_name', user.real_name)
+        sessionStorage.setItem('user_token', token)
+        sessionStorage.setItem('user_role', user.role)
+        sessionStorage.setItem('user_id', user.id)
+        sessionStorage.setItem('user_name', user.real_name || user.username)
+        sessionStorage.setItem('username', user.username)
+        sessionStorage.setItem('real_name', user.real_name)
 
         ElMessage.success('登录成功')
 

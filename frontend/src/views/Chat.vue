@@ -385,9 +385,9 @@ const hiddenConversation = ref(null)  // 存储隐藏的对话（如讨论组）
 
 // Socket连接
 let socket = null
-const userId = localStorage.getItem('user_id')
-const userRole = localStorage.getItem('user_role')
-const userName = localStorage.getItem('user_name') || localStorage.getItem('real_name') || localStorage.getItem('username')
+const userId = sessionStorage.getItem('user_id')
+const userRole = sessionStorage.getItem('user_role')
+const userName = sessionStorage.getItem('user_name') || sessionStorage.getItem('real_name') || sessionStorage.getItem('username')
 
 // ===== 计算属性 (Computed) =====
 const currentMessages = computed(() => {

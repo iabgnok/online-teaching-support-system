@@ -184,9 +184,9 @@ const router = createRouter({
 
 router.beforeEach((to, from, next) => {
 
-  const role = localStorage.getItem('user_role')
+  const role = sessionStorage.getItem('user_role')
 
-  const token = localStorage.getItem('user_token')
+  const token = sessionStorage.getItem('user_token')
 
  
 

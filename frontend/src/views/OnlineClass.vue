@@ -382,11 +382,11 @@ export default {
     // ========== 通用方法 ==========
     
     loadUserInfo() {
-      this.currentUserId = parseInt(localStorage.getItem('user_id') || '0')
-      this.currentUserName = localStorage.getItem('user_name') || localStorage.getItem('real_name') || localStorage.getItem('username') || '用户'
+      this.currentUserId = parseInt(sessionStorage.getItem('user_id') || '0')
+      this.currentUserName = sessionStorage.getItem('user_name') || sessionStorage.getItem('real_name') || sessionStorage.getItem('username') || '用户'
       
       // 确定用户角色
-      const userRole = localStorage.getItem('user_role')
+      const userRole = sessionStorage.getItem('user_role')
       this.userRole = userRole === 'teacher' ? 'teacher' : 'student'
     },
     

@@ -272,7 +272,7 @@ const isTyping = ref(false)
 let typingTimer = null
 
 // 获取用户角色
-const userRole = localStorage.getItem('user_role')
+const userRole = sessionStorage.getItem('user_role')
 
 // @提及相关
 const showMentionSelector = ref(false)

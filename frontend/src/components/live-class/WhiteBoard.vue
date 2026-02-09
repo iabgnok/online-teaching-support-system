@@ -979,13 +979,15 @@ export default {
 /* 左侧工具栏 */
 .toolbar-left {
   width: 72px;
-  background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
+  background: var(--bg-card);
+  border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
   padding: 12px 8px;
   gap: 8px;
   overflow-y: auto;
   flex-shrink: 0;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.05);
 }
 
 .toolbar-left::-webkit-scrollbar {
@@ -993,8 +995,12 @@ export default {
 }
 
 .toolbar-left::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--border-color);
   border-radius: 2px;
+}
+
+.toolbar-left::-webkit-scrollbar-thumb:hover {
+  background: var(--text-tertiary);
 }
 
 .tool-group {
@@ -1002,7 +1008,7 @@ export default {
   flex-direction: column;
   gap: 4px;
   padding-bottom: 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid var(--border-light);
 }
 
 .tool-group:last-child {
@@ -1011,7 +1017,7 @@ export default {
 
 .tool-group-label {
   font-size: 10px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--text-tertiary);
   text-align: center;
   margin-bottom: 4px;
   text-transform: uppercase;
@@ -1027,19 +1033,19 @@ export default {
   padding: 8px 4px;
   border: none;
   background: transparent;
-  color: rgba(255, 255, 255, 0.7);
-  border-radius: 8px;
+  color: var(--text-secondary);
+  border-radius: var(--radius-md);
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .tool-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
 }
 
 .tool-btn.active {
-  background: linear-gradient(135deg, #409eff 0%, #66b1ff 100%);
+  background: #409EFF;
   color: #fff;
   box-shadow: 0 2px 8px rgba(64, 158, 255, 0.4);
 }
@@ -1084,13 +1090,14 @@ export default {
   left: 100%;
   top: 0;
   margin-left: 8px;
-  background: #1a1a2e;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
   padding: 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   gap: 4px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-lg);
   z-index: 100;
 }
 
@@ -1108,7 +1115,9 @@ export default {
 }
 
 .color-swatch.active {
-  border-color: #fff;
+  border-color: #409EFF;
+  border-radius: 8px;
+  box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.3);
 }
 
 .custom-color-input {
@@ -1146,7 +1155,7 @@ export default {
 
 .size-value {
   font-size: 10px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-tertiary);
 }
 
 /* 画布区域 */
