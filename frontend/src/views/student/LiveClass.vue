@@ -58,7 +58,7 @@
 <script>
 import io from 'socket.io-client'
 import api from '../../api'
-import CollapsibleDiscussionPanel from '../../components/CollapsibleDiscussionPanel.vue'
+import CollapsibleDiscussionPanel from '../../components/forum/CollapsibleDiscussionPanel.vue'
 
 export default {
   name: 'StudentLiveClass',
@@ -155,16 +155,28 @@ export default {
     
     async loadClassInfo() {
       try {
-        const response = await api.get(`/live-class/${this.lessonId}`)
-        if (response.data.code === 200) {
-          this.classInfo = response.data.data
-          this.discussionConversationId = response.data.data.discussion_conversation_id
-          this.classGroupConversationId = response.data.data.class_group_conversation_id
-          this.classGroupName = response.data.data.class_group_name || '班级群组'
+        const response = await api.get(`/live-class/${this.lessonId}/join`)
+        this.classInfo = response.data
+        this.discussionConversationId = response.data.conversation_id
+        
+        if (response.data.class_id) {
+          this.loadClassGroupInfo(response.data.class_id)
         }
       } catch (error) {
         console.error('加载课堂信息失败:', error)
-        this.$message.error('加载课堂信息失败')
+        this.$message.error(error.response?.data?.error || '加载课堂信息失败')
+        // 如果加载失败，返回上一页
+        this.$router.go(-1)
+      }
+    },
+    
+    async loadClassGroupInfo(classId) {
+      try {
+        const response = await api.get(`/chat/class/${classId}/group`)
+        this.classGroupConversationId = response.data.conversation_id
+        this.classGroupName = response.data.name
+      } catch (error) {
+        console.error('加载班级群组信息失败:', error)
       }
     },
     
@@ -284,7 +296,7 @@ export default {
 
 /* 顶部工具栏 */
 .top-toolbar {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #409eff 0%, #66b3ff 100%);
   color: white;
   padding: 12px 24px;
   display: flex;

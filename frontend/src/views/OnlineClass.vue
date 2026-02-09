@@ -245,7 +245,7 @@
 <script>
 import io from 'socket.io-client'
 import api from '../api'
-import CollapsibleDiscussionPanel from '@/components/CollapsibleDiscussionPanel.vue'
+import CollapsibleDiscussionPanel from '@/components/forum/CollapsibleDiscussionPanel.vue'
 
 export default {
   name: 'OnlineClass',

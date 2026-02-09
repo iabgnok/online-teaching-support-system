@@ -212,8 +212,8 @@ import { ref, reactive, onMounted } from 'vue'
 import api from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Paperclip, Document, ArrowUp, ArrowDown, ChatSquare, Share, User, Picture, Link } from '@element-plus/icons-vue'
-import PostListCard from '../components/PostListCard.vue'
-import CommentItem from '../components/CommentItem.vue'
+import PostListCard from '../components/forum/PostListCard.vue'
+import CommentItem from '../components/forum/CommentItem.vue'
 
 const classId = ref('')
 const classList = ref([])

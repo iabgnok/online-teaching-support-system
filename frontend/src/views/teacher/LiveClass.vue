@@ -228,7 +228,7 @@
 <script>
 import io from 'socket.io-client'
 import api from '../../api'
-import CollapsibleDiscussionPanel from '@/components/CollapsibleDiscussionPanel.vue'
+import CollapsibleDiscussionPanel from '@/components/forum/CollapsibleDiscussionPanel.vue'
 
 export default {
   name: 'TeacherLiveClass',
@@ -332,6 +332,7 @@ export default {
     }
   },
   mounted() {
+    console.log('LiveClass mounted, lessonId:', this.lessonId, 'type:', typeof this.lessonId)
     this.loadUserInfo()
     this.initSocket()
     this.initCanvas()
@@ -735,6 +736,7 @@ export default {
 
     loadClassInfo() {
       // 使用配置好的 api 实例获取课堂信息
+      console.log('loadClassInfo called, lessonId:', this.lessonId)
       api.get(`/live-class/${this.lessonId}/join`)
       .then(res => {
         this.classInfo = res.data
@@ -1597,7 +1599,7 @@ canvas {
 /* 聊天头部 */
 .chat-header {
   padding: 12px 16px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #409eff 0%, #66b3ff 100%);
   color: white;
   display: flex;
   justify-content: space-between;
@@ -1730,7 +1732,7 @@ canvas {
 
 .card-header {
   padding: 12px 16px;
-  background: linear-gradient(135deg, #667eea20 0%, #764ba220 100%);
+  background: linear-gradient(135deg, #409eff20 0%, #66b3ff20 100%);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1867,7 +1869,7 @@ canvas {
 
 .progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(90deg, #409eff 0%, #66b3ff 100%);
   transition: width 0.3s;
 }
 
@@ -1976,7 +1978,7 @@ canvas {
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #409eff 0%, #66b3ff 100%);
   color: white;
   display: flex;
   align-items: center;
@@ -2029,7 +2031,7 @@ canvas {
 }
 
 .message-bubble.sent {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #409eff 0%, #66b3ff 100%);
   color: white;
   border-bottom-right-radius: 4px;
 }
@@ -2270,7 +2272,7 @@ canvas {
 }
 
 .send-button.active {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #409eff 0%, #66b3ff 100%);
   color: white;
   cursor: pointer;
 }

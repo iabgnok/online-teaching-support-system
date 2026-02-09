@@ -1,0 +1,859 @@
+﻿<template>
+  <div class="live-class-room" :class="{ 'is-teacher': isTeacher }">
+    <!-- 鍔犺浇鐘舵€?-->
+    <div v-if="loading" class="loading-overlay">
+      <div class="loading-spinner"></div>
+      <p>姝ｅ湪鍔犺浇璇惧爞...</p>
+    </div>
+    
+    <!-- 閿欒鐘舵€?-->
+    <div v-else-if="error" class="error-overlay">
+      <div class="error-icon">鈿狅笍</div>
+      <h3>鍔犺浇澶辫触</h3>
+      <p>{{ error }}</p>
+      <button class="retry-btn" @click="loadLessonInfo">閲嶈瘯</button>
+      <button class="back-btn" @click="exitClass">杩斿洖</button>
+    </div>
+    
+    <!-- 涓诲唴瀹?-->
+    <template v-else>
+      <!-- 椤堕儴宸ュ叿鏍?-->
+      <LiveClassToolbar
+        :role="userRole"
+        :lesson-info="lessonInfo"
+        :participant-count="onlineCount"
+        :show-participants="showParticipants"
+        :is-screen-sharing="isScreenSharing"
+        @toggle-participants="showParticipants = !showParticipants"
+        @toggle-screen-share="handleScreenShare"
+        @start-attendance="handleStartAttendance"
+        @publish-task="handlePublishTask"
+        @start-quiz="handleStartQuiz"
+        @exit="handleExit"
+      />
+      
+      <!-- 涓昏鍐呭鍖哄煙 -->
+      <div class="main-content">
+        <!-- 宸︿晶锛氱敾鏉垮尯鍩?-->
+        <div class="whiteboard-container">
+          <!-- 鏈紑濮嬫彁绀?-->
+          <div v-if="!isLive && !isEnded" class="not-started-overlay">
+            <div class="waiting-content">
+              <div class="waiting-icon">馃摎</div>
+              <h2>{{ lessonInfo?.title || '绾夸笂璇惧爞' }}</h2>
+              <p v-if="isTeacher">璇惧爞灏氭湭寮€濮嬶紝鐐瑰嚮涓嬫柟鎸夐挳寮€濮嬫巿璇?/p>
+              <p v-else>璇惧爞灏氭湭寮€濮嬶紝璇风瓑寰呮暀甯堝紑鍚?..</p>
+              <button 
+                v-if="isTeacher" 
+                class="start-class-btn"
+                @click="handleStartClass"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                </svg>
+                寮€濮嬭鍫?
+              </button>
+            </div>
+          </div>
+          
+          <!-- 宸茬粨鏉熸彁绀?-->
+          <div v-if="isEnded" class="ended-overlay">
+            <div class="ended-content">
+              <div class="ended-icon">鉁?/div>
+              <h2>璇惧爞宸茬粨鏉?/h2>
+              <p>鏈璇惧爞鎸佺画鏃堕棿锛歿{ formattedDuration }}</p>
+              <button class="back-btn" @click="exitClass">杩斿洖</button>
+            </div>
+          </div>
+          
+          <!-- 鐢绘澘缁勪欢 -->
+          <WhiteBoard
+            ref="whiteboardRef"
+            :lesson-id="lessonId"
+            :readonly="whiteboardReadonly"
+            :socket="socket"
+          />
+          
+          <!-- 灞忓箷鍏变韩鏄剧ず鍖哄煙 -->
+          <div v-if="isScreenSharing && !isTeacher" class="screen-share-view">
+            <video ref="screenShareVideo" autoplay playsinline></video>
+          </div>
+        </div>
+        
+        <!-- 鍙充晶锛氳亰澶╅潰鏉?-->
+        <LiveClassChat
+          ref="chatRef"
+          :discussion-conversation-id="discussionConversationId"
+          :class-group-conversation-id="classGroupConversationId"
+          :role="userRole"
+          :socket="socket"
+          :initial-collapsed="false"
+          @collapse-change="handleChatCollapse"
+          @start-attendance="handleStartAttendance"
+          @publish-task="handlePublishTask"
+          @share-board="handleShareBoard"
+          @raise-hand="handleRaiseHand"
+        />
+      </div>
+      
+      <!-- 鍙備笌鑰呴潰鏉?-->
+      <ParticipantsPanel
+        :visible="showParticipants"
+        :participants="participants"
+        :role="userRole"
+        @close="showParticipants = false"
+        @allow-speak="handleAllowSpeak"
+        @focus-student="handleFocusStudent"
+        @answer-student="handleAnswerStudent"
+        @dismiss-hand="handleDismissHand"
+      />
+      
+      <!-- 瀛︾敓涓炬墜鎸夐挳 -->
+      <div v-if="isStudent && isLive" class="student-actions">
+        <button 
+          class="raise-hand-btn"
+          :class="{ active: handRaised }"
+          @click="toggleRaiseHand"
+          :title="handRaised ? '鏀句笅鎵? : '涓炬墜'"
+        >
+          <span class="hand-emoji">鉁?/span>
+          <span v-if="!handRaised">涓炬墜</span>
+          <span v-else>鏀句笅</span>
+        </button>
+      </div>
+      
+      <!-- 绛惧埌寮圭獥 -->
+      <AttendanceModal
+        v-if="showAttendanceModal"
+        :is-teacher="isTeacher"
+        :attendance-data="currentAttendance"
+        @close="showAttendanceModal = false"
+        @submit="handleAttendanceSubmit"
+      />
+      
+      <!-- 浠诲姟寮圭獥 -->
+      <TaskModal
+        v-if="showTaskModal"
+        :is-teacher="isTeacher"
+        @close="showTaskModal = false"
+        @submit="handleTaskSubmit"
+      />
+      
+      <!-- 杩炴帴鐘舵€佹彁绀?-->
+      <transition name="fade">
+        <div v-if="reconnecting" class="connection-status">
+          <div class="status-content">
+            <div class="reconnect-spinner"></div>
+            <span>姝ｅ湪閲嶆柊杩炴帴...</span>
+          </div>
+        </div>
+      </transition>
+    </template>
+  </div>
+</template>
+
+<script>
+import { ref, computed, watch, onMounted, provide } from 'vue'
+import { useRoute } from 'vue-router'
+import { useLiveClass } from '../composables/useLiveClass'
+import WhiteBoard from '../components/live-class/WhiteBoard.vue'
+import LiveClassToolbar from '../components/live-class/LiveClassToolbar.vue'
+import LiveClassChat from '../components/live-class/LiveClassChat.vue'
+import ParticipantsPanel from '../components/live-class/ParticipantsPanel.vue'
+
+// 鍙€夌殑寮圭獥缁勪欢锛堝鏋滃瓨鍦級
+const AttendanceModal = {
+  name: 'AttendanceModal',
+  props: ['isTeacher', 'attendanceData'],
+  emits: ['close', 'submit'],
+  template: `
+    <div class="modal-overlay" @click.self="$emit('close')">
+      <div class="modal-content">
+        <h3>{{ isTeacher ? '鍙戣捣绛惧埌' : '璇惧爞绛惧埌' }}</h3>
+        <div v-if="isTeacher" class="teacher-attendance">
+          <div class="form-group">
+            <label>绛惧埌绫诲瀷</label>
+            <select v-model="attendanceType">
+              <option value="click">鐐瑰嚮绛惧埌</option>
+              <option value="code">楠岃瘉鐮佺鍒?/option>
+              <option value="location">浣嶇疆绛惧埌</option>
+            </select>
+          </div>
+          <div class="form-group" v-if="attendanceType === 'code'">
+            <label>楠岃瘉鐮?/label>
+            <input type="text" v-model="code" placeholder="4浣嶆暟瀛楅獙璇佺爜" maxlength="4" />
+          </div>
+          <div class="form-group">
+            <label>绛惧埌鏃堕檺锛堝垎閽燂級</label>
+            <input type="number" v-model="duration" min="1" max="30" />
+          </div>
+          <button class="primary-btn" @click="submit">寮€濮嬬鍒?/button>
+        </div>
+        <div v-else class="student-attendance">
+          <p>鏁欏笀宸插彂璧风鍒?/p>
+          <input v-if="attendanceData?.type === 'code'" type="text" v-model="inputCode" placeholder="璇疯緭鍏ラ獙璇佺爜" />
+          <button class="primary-btn" @click="submit">纭绛惧埌</button>
+        </div>
+      </div>
+    </div>
+  `,
+  setup(props, { emit }) {
+    const attendanceType = ref('click')
+    const code = ref('')
+    const duration = ref(5)
+    const inputCode = ref('')
+    
+    const submit = () => {
+      if (props.isTeacher) {
+        emit('submit', {
+          type: attendanceType.value,
+          code: code.value,
+          duration: duration.value
+        })
+      } else {
+        emit('submit', { code: inputCode.value })
+      }
+    }
+    
+    return { attendanceType, code, duration, inputCode, submit }
+  }
+}
+
+const TaskModal = {
+  name: 'TaskModal',
+  props: ['isTeacher'],
+  emits: ['close', 'submit'],
+  template: `
+    <div class="modal-overlay" @click.self="$emit('close')">
+      <div class="modal-content">
+        <h3>鍙戝竷璇惧爞浠诲姟</h3>
+        <div class="form-group">
+          <label>浠诲姟鏍囬</label>
+          <input type="text" v-model="title" placeholder="璇疯緭鍏ヤ换鍔℃爣棰? />
+        </div>
+        <div class="form-group">
+          <label>浠诲姟鎻忚堪</label>
+          <textarea v-model="description" placeholder="璇疯緭鍏ヤ换鍔℃弿杩? rows="4"></textarea>
+        </div>
+        <div class="form-group">
+          <label>鎴鏃堕棿锛堝垎閽熷悗锛?/label>
+          <input type="number" v-model="deadline" min="1" max="60" />
+        </div>
+        <button class="primary-btn" @click="submit">鍙戝竷浠诲姟</button>
+      </div>
+    </div>
+  `,
+  setup(props, { emit }) {
+    const title = ref('')
+    const description = ref('')
+    const deadline = ref(10)
+    
+    const submit = () => {
+      emit('submit', {
+        title: title.value,
+        description: description.value,
+        deadline: deadline.value
+      })
+    }
+    
+    return { title, description, deadline, submit }
+  }
+}
+
+export default {
+  name: 'LiveClassRoom',
+  components: {
+    WhiteBoard,
+    LiveClassToolbar,
+    LiveClassChat,
+    ParticipantsPanel,
+    AttendanceModal,
+    TaskModal
+  },
+  setup() {
+    const route = useRoute()
+    
+    // 浣跨敤 composable
+    const {
+      lessonId,
+      lessonInfo,
+      loading,
+      error,
+      userRole,
+      socket,
+      connected,
+      reconnecting,
+      participants,
+      onlineCount,
+      classroomStatus,
+      duration,
+      formattedDuration,
+      whiteboardReadonly,
+      isScreenSharing,
+      screenShareStream,
+      discussionConversationId,
+      classGroupConversationId,
+      isTeacher,
+      isStudent,
+      isLive,
+      isEnded,
+      loadLessonInfo,
+      exitClass,
+      startClass,
+      endClass,
+      startAttendance,
+      publishTask,
+      startScreenShare,
+      stopScreenShare,
+      raiseHand
+    } = useLiveClass()
+    
+    // ========== Refs ==========
+    const whiteboardRef = ref(null)
+    const chatRef = ref(null)
+    const screenShareVideo = ref(null)
+    
+    // ========== State ==========
+    const showParticipants = ref(false)
+    const handRaised = ref(false)
+    const showAttendanceModal = ref(false)
+    const showTaskModal = ref(false)
+    const currentAttendance = ref(null)
+    
+    // ========== Provide ==========
+    // 鍚戝瓙缁勪欢鎻愪緵socket
+    provide('socket', socket)
+    provide('lessonId', lessonId)
+    provide('userRole', userRole)
+    
+    // ========== Handlers ==========
+    const handleStartClass = async () => {
+      try {
+        await startClass()
+      } catch (err) {
+        alert('寮€濮嬭鍫傚け璐ワ細' + (err.message || '璇烽噸璇?))
+      }
+    }
+    
+    const handleExit = async () => {
+      if (isTeacher.value && isLive.value) {
+        const confirmEnd = confirm('璇惧爞姝ｅ湪杩涜涓紝鏄惁缁撴潫璇惧爞骞堕€€鍑猴紵')
+        if (confirmEnd) {
+          try {
+            await endClass()
+          } catch (err) {
+            console.error('End class failed:', err)
+          }
+        } else {
+          return
+        }
+      }
+      exitClass()
+    }
+    
+    const handleScreenShare = async () => {
+      if (isScreenSharing.value) {
+        stopScreenShare()
+      } else {
+        try {
+          await startScreenShare()
+        } catch (err) {
+          if (err.name !== 'NotAllowedError') {
+            alert('灞忓箷鍏变韩澶辫触锛? + err.message)
+          }
+        }
+      }
+    }
+    
+    const handleStartAttendance = () => {
+      showAttendanceModal.value = true
+    }
+    
+    const handleAttendanceSubmit = async (data) => {
+      try {
+        if (isTeacher.value) {
+          await startAttendance(data)
+        } else {
+          // 瀛︾敓绛惧埌
+          // await checkIn(data.code)
+        }
+        showAttendanceModal.value = false
+      } catch (err) {
+        alert('绛惧埌澶辫触锛? + err.message)
+      }
+    }
+    
+    const handlePublishTask = () => {
+      showTaskModal.value = true
+    }
+    
+    const handleTaskSubmit = async (data) => {
+      try {
+        await publishTask(data)
+        showTaskModal.value = false
+      } catch (err) {
+        alert('鍙戝竷浠诲姟澶辫触锛? + err.message)
+      }
+    }
+    
+    const handleStartQuiz = () => {
+      // TODO: 瀹炵幇璇惧爞娴嬮獙
+      console.log('Start quiz')
+    }
+    
+    const handleShareBoard = () => {
+      // 鍒嗕韩鐢绘澘褰撳墠鍐呭
+      if (whiteboardRef.value) {
+        const dataUrl = whiteboardRef.value.toDataURL?.()
+        console.log('Share board:', dataUrl)
+      }
+    }
+    
+    const toggleRaiseHand = () => {
+      handRaised.value = !handRaised.value
+      raiseHand(handRaised.value)
+    }
+    
+    const handleRaiseHand = (raised) => {
+      handRaised.value = raised
+      raiseHand(raised)
+    }
+    
+    const handleAllowSpeak = (student) => {
+      socket.value?.emit('classroom:allow_speak', {
+        lesson_id: lessonId.value,
+        student_id: student.id,
+        allow: !student.can_speak
+      })
+    }
+    
+    const handleFocusStudent = (student) => {
+      console.log('Focus student:', student)
+    }
+    
+    const handleAnswerStudent = (student) => {
+      // 鍥炲簲涓炬墜瀛︾敓
+      socket.value?.emit('classroom:answer_hand', {
+        lesson_id: lessonId.value,
+        student_id: student.id
+      })
+    }
+    
+    const handleDismissHand = (student) => {
+      socket.value?.emit('classroom:dismiss_hand', {
+        lesson_id: lessonId.value,
+        student_id: student.id
+      })
+    }
+    
+    const handleChatCollapse = (collapsed) => {
+      // 鑱婂ぉ闈㈡澘鎶樺彔鏃跺彲浠ヨ皟鏁寸敾鏉垮ぇ灏?
+      console.log('Chat collapsed:', collapsed)
+    }
+    
+    // 鐩戝惉灞忓箷鍏变韩娴?
+    watch(screenShareStream, (stream) => {
+      if (screenShareVideo.value && stream) {
+        screenShareVideo.value.srcObject = stream
+      }
+    })
+    
+    return {
+      // Refs
+      whiteboardRef,
+      chatRef,
+      screenShareVideo,
+      
+      // Composable state
+      lessonId,
+      lessonInfo,
+      loading,
+      error,
+      userRole,
+      socket,
+      connected,
+      reconnecting,
+      participants,
+      onlineCount,
+      classroomStatus,
+      duration,
+      formattedDuration,
+      whiteboardReadonly,
+      isScreenSharing,
+      discussionConversationId,
+      classGroupConversationId,
+      isTeacher,
+      isStudent,
+      isLive,
+      isEnded,
+      
+      // Local state
+      showParticipants,
+      handRaised,
+      showAttendanceModal,
+      showTaskModal,
+      currentAttendance,
+      
+      // Methods
+      loadLessonInfo,
+      exitClass,
+      handleStartClass,
+      handleExit,
+      handleScreenShare,
+      handleStartAttendance,
+      handleAttendanceSubmit,
+      handlePublishTask,
+      handleTaskSubmit,
+      handleStartQuiz,
+      handleShareBoard,
+      toggleRaiseHand,
+      handleRaiseHand,
+      handleAllowSpeak,
+      handleFocusStudent,
+      handleAnswerStudent,
+      handleDismissHand,
+      handleChatCollapse
+    }
+  }
+}
+</script>
+
+<style scoped>
+.live-class-room {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: #f5f7fa;
+  overflow: hidden;
+}
+
+/* 鍔犺浇鐘舵€?*/
+.loading-overlay,
+.error-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  z-index: 1000;
+}
+
+.loading-spinner {
+  width: 48px;
+  height: 48px;
+  border: 4px solid #f0f0f0;
+  border-top-color: #409eff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-overlay p {
+  margin-top: 16px;
+  color: #666;
+}
+
+.error-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+
+.error-overlay h3 {
+  margin: 0 0 8px;
+  color: #333;
+}
+
+.error-overlay p {
+  margin: 0 0 24px;
+  color: #666;
+}
+
+.retry-btn,
+.back-btn {
+  padding: 10px 24px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.retry-btn {
+  background: linear-gradient(135deg, #409eff 0%, #66b1ff 100%);
+  color: #fff;
+  margin-right: 12px;
+}
+
+.retry-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.4);
+}
+
+.back-btn {
+  background: #f0f0f0;
+  color: #666;
+}
+
+.back-btn:hover {
+  background: #e0e0e0;
+}
+
+/* 涓诲唴瀹?*/
+.main-content {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  padding: 12px;
+  gap: 12px;
+}
+
+/* 鐢绘澘瀹瑰櫒 */
+.whiteboard-container {
+  flex: 1;
+  position: relative;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+}
+
+/* 鏈紑濮?宸茬粨鏉熼伄缃?*/
+.not-started-overlay,
+.ended-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.95);
+  z-index: 10;
+}
+
+.waiting-content,
+.ended-content {
+  text-align: center;
+  padding: 40px;
+}
+
+.waiting-icon,
+.ended-icon {
+  font-size: 64px;
+  margin-bottom: 16px;
+}
+
+.waiting-content h2,
+.ended-content h2 {
+  margin: 0 0 12px;
+  font-size: 24px;
+  color: #333;
+}
+
+.waiting-content p,
+.ended-content p {
+  margin: 0 0 24px;
+  color: #666;
+}
+
+.start-class-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 32px;
+  background: linear-gradient(135deg, #409eff 0%, #66b1ff 100%);
+  color: #fff;
+  border: none;
+  border-radius: 24px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.start-class-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(64, 158, 255, 0.4);
+}
+
+/* 灞忓箷鍏变韩瑙嗗浘 */
+.screen-share-view {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  z-index: 5;
+}
+
+.screen-share-view video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* 瀛︾敓鎿嶄綔鍖?*/
+.student-actions {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+}
+
+.raise-hand-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 24px;
+  background: #fff;
+  border: 2px solid #ddd;
+  border-radius: 24px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.3s;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+}
+
+.raise-hand-btn:hover {
+  border-color: #ffc107;
+  background: #fffbeb;
+}
+
+.raise-hand-btn.active {
+  background: #ffc107;
+  border-color: #ffc107;
+  color: #fff;
+}
+
+.raise-hand-btn.active .hand-emoji {
+  animation: wave 1s infinite;
+}
+
+@keyframes wave {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(20deg); }
+  75% { transform: rotate(-20deg); }
+}
+
+.hand-emoji {
+  font-size: 20px;
+}
+
+/* 杩炴帴鐘舵€?*/
+.connection-status {
+  position: fixed;
+  top: 70px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+}
+
+.status-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: #ff9800;
+  color: #fff;
+  border-radius: 20px;
+  font-size: 13px;
+  box-shadow: 0 4px 12px rgba(255, 152, 0, 0.4);
+}
+
+.reconnect-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+/* 寮圭獥鏍峰紡 */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.modal-content {
+  background: #fff;
+  border-radius: 16px;
+  padding: 24px;
+  width: 90%;
+  max-width: 400px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.modal-content h3 {
+  margin: 0 0 20px;
+  font-size: 18px;
+  color: #333;
+}
+
+.form-group {
+  margin-bottom: 16px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #666;
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 14px;
+  transition: border-color 0.2s;
+}
+
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+  outline: none;
+  border-color: #409eff;
+}
+
+.primary-btn {
+  width: 100%;
+  padding: 12px;
+  background: linear-gradient(135deg, #409eff 0%, #66b1ff 100%);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.primary-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.4);
+}
+
+/* 杩囨浮鍔ㄧ敾 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+</style>

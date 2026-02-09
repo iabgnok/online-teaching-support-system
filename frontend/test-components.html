@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>组件测试</title>
+</head>
+<body>
+  <div id="app">
+    <h1>组件测试页面</h1>
+
+    <!-- 测试基础UI组件 -->
+    <h2>基础UI组件测试</h2>
+    <base-button type="primary">主要按钮</base-button>
+    <base-button type="secondary">次要按钮</base-button>
+    <base-input placeholder="测试输入框" />
+
+    <!-- 测试认证组件 -->
+    <h2>认证组件测试</h2>
+    <login-form @login="handleLogin" />
+
+    <!-- 测试聊天组件 -->
+    <h2>聊天组件测试</h2>
+    <chat-window
+      title="测试聊天"
+      :messages="testMessages"
+      :current-user="testUser"
+      @send="handleSendMessage"
+    />
+  </div>
+
+  <script type="module">
+    import { createApp } from 'vue'
+    import BaseButton from './src/components/common/ui/BaseButton.vue'
+    import BaseInput from './src/components/common/ui/BaseInput.vue'
+    import LoginForm from './src/components/auth/LoginForm.vue'
+    import ChatWindow from './src/components/chat/ChatWindow.vue'
+
+    const app = createApp({
+      components: {
+        BaseButton,
+        BaseInput,
+        LoginForm,
+        ChatWindow
+      },
+      data() {
+        return {
+          testMessages: [
+            { id: 1, content: '测试消息1', sender: 'user1', timestamp: new Date() },
+            { id: 2, content: '测试消息2', sender: 'user2', timestamp: new Date() }
+          ],
+          testUser: { id: 'user1', name: '测试用户' }
+        }
+      },
+      methods: {
+        handleLogin(credentials) {
+          console.log('Login:', credentials)
+        },
+        handleSendMessage(message) {
+          console.log('Send message:', message)
+          this.testMessages.push({
+            id: Date.now(),
+            content: message,
+            sender: this.testUser.id,
+            timestamp: new Date()
+          })
+        }
+      }
+    })
+
+    app.mount('#app')
+  </script>
+</body>
+</html>

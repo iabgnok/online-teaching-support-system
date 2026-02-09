@@ -254,6 +254,18 @@ def join_live_class(lesson_id):
                 'timestamp': m.created_at.isoformat()
             })
     
+    # 获取班级群对话ID
+    class_group_conversation = Conversation.query.filter_by(
+        class_id=live_class.class_id,
+        conversation_type='class_group'
+    ).first()
+    
+    # 确定用户角色
+    user_role = g.user.role
+    if user_role == 'admin':
+        # 管理员以教师身份进入
+        user_role = 'teacher'
+    
     return jsonify({
         'live_class_id': live_class.id,
         'class_id': live_class.class_id,
@@ -262,6 +274,8 @@ def join_live_class(lesson_id):
         'start_time': live_class.start_time.isoformat(),
         'participants_count': live_class.participants_count,
         'conversation_id': conversation.id if conversation else None,
+        'class_group_conversation_id': class_group_conversation.id if class_group_conversation else None,
+        'user_role': user_role,
         'history': history_messages
     })
 

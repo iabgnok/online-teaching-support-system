@@ -328,7 +328,7 @@ onMounted(() => {
 }
 
 .total-grade-card {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #409eff 0%, #66b3ff 100%);
   color: white;
 }
 

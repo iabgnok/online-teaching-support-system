@@ -5,194 +5,63 @@
     
     <!-- 左侧：对话列表 -->
     <div class="chat-sidebar">
-      <!-- 对话列表区域 -->
-      <div class="conversation-area">
-        <div class="sidebar-header">
-          <h2>教学群组</h2>
-          <button class="btn-new-chat" @click="showNewChatDialog = true" title="新建群组">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-              <circle cx="9" cy="7" r="4"></circle>
-              <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
-              <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
-            </svg>
-          </button>
-        </div>
-        
-        <div class="search-box">
-          <el-input 
-            v-model="searchQuery" 
-            placeholder="搜索对话或消息..." 
-            prefix-icon="el-icon-search"
-            clearable
-          />
-        </div>
-        
-        <!-- 分类栏：位于搜索框与群组列表之间 -->
-        <div class="category-bar">
-          <div class="category-tabs">
-            <div 
-              class="category-tab" 
-              :class="{ active: activeFolderId === 'all' }"
-              @click="handleFolderChange('all')"
-            >
-              全部
-            </div>
-            <div 
-              v-if="totalUnreadCount > 0"
-              class="category-tab" 
-              :class="{ active: activeFolderId === 'unread' }"
-              @click="handleFolderChange('unread')"
-            >
-              未读
-              <span v-if="totalUnreadCount > 0" class="category-badge">{{ totalUnreadCount > 99 ? '99+' : totalUnreadCount }}</span>
-            </div>
-            <div 
-              v-for="folder in folders" 
-              :key="folder.id"
-              class="category-tab folder-tab"
-              :class="{ active: activeFolderId === folder.id }"
-              @click="handleFolderChange(folder.id)"
-            >
-              {{ folder.name }}
-              <button class="tab-delete-btn" @click.stop="deleteFolder(folder.id)" title="删除">
-                <i class="el-icon-close"></i>
-              </button>
-            </div>
-          </div>
-          <button class="btn-add-folder" @click="showNewFolderDialog = true" title="新建文件夹">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19"></line>
-              <line x1="5" y1="12" x2="19" y2="12"></line>
-            </svg>
-          </button>
-        </div>
-        
-        <div class="conversation-list">
-          <ConversationItem 
-            v-for="conv in filteredConversations" 
-            :key="conv.id"
-            :conversation="conv"
-            :active="currentConversationId === conv.id"
-            :context-menu-visible="activeContextMenu === conv.id"
-            :folders="folders"
-            :active-folder-id="activeFolderId"
-            @click="selectConversation(conv.id)"
-            @show-context-menu="handleShowContextMenu(conv.id, $event)"
-            @hide-context-menu="handleHideContextMenu"
-            @pin="handlePinConversation"
-            @mute="handleMuteConversation"
-            @read="handleMarkAsRead"
-            @add-to-folder="handleAddToFolder"
-            @open-create-folder="handleOpenCreateFolder"
-            @remove-from-folder="handleRemoveFromFolder"
-            @leave="handleLeaveGroup"
-          />
-          
-          <div v-if="conversations.length === 0" class="empty-state">
-            <p>暂无对话</p>
-            <el-button type="primary" size="small" @click="showNewChatDialog = true">
-              开始聊天
-            </el-button>
-          </div>
-        </div>
-      </div>
+      <ConversationList
+        :conversations="conversations"
+        :current-conversation-id="currentConversationId"
+        :active-folder-id="activeFolderId"
+        :folders="folders"
+        :total-unread-count="totalUnreadCount"
+        :search-query="searchQuery"
+        :active-context-menu="activeContextMenu"
+        @update:searchQuery="searchQuery = $event"
+        @select="selectConversation"
+        @new-chat="showNewChatDialog = true"
+        @folder-change="handleFolderChange"
+        @add-folder="showNewFolderDialog = true"
+        @delete-folder="deleteFolder"
+        @show-context-menu="handleShowContextMenu"
+        @hide-context-menu="handleHideContextMenu"
+        @pin="handlePinConversation"
+        @mute="handleMuteConversation"
+        @read="handleMarkAsRead"
+        @add-to-folder="handleAddToFolder"
+        @open-create-folder="handleOpenCreateFolder"  
+        @remove-from-folder="handleRemoveFromFolder"
+        @leave="handleLeaveGroup"
+      />
     </div>
     
     <!-- 中间：聊天主区域 -->
     <div class="chat-main">
       <template v-if="currentConversation">
-        <!-- 只在非讨论模式下显示群组头部 -->
-        <ChatHeader 
-          v-if="!discussionMode"
-          :conversation="currentConversation"
-          @show-info="showInfoPanel = !showInfoPanel"
-        />
-        
-        <PinnedMessageBar
-          ref="pinnedMessageBar"
+        <ChatWindow
+          ref="chatWindowRef"
           :conversation-id="currentConversationId"
+          :conversation="currentConversation"
+          :messages="currentMessages"
+          :conversation-subtype="currentConversation?.group_subtype"
+          :user-role="userRole"
+          :is-discussion-mode="discussionMode"
+          :root-message="rootMessage"
+          :message-filter-type="messageFilterType"
+          :reply-to-message="replyToMessage"
+          :editing-message="editingMessage"
           :can-unpin="canUnpin"
+          @show-info="showInfoPanel = !showInfoPanel"
           @jump-to-message="handleJumpToMessage"
-          @message-unpinned="handleMessageUnpinned" 
+          @message-unpinned="handleMessageUnpinned"
+          @exit-discussion="exitDiscussionMode"
+          @clear-filter="handleFilter(null)"
+          @load-more="loadMoreMessages"
+          @reply="handleReply"
+          @edit="handleEdit"
+          @delete="handleDelete"
+          @open-comments="handleOpenComments"
+          @send="handleSendMessage"
+          @cancel-reply="replyToMessage = null"
+          @cancel-edit="editingMessage = null"
+          @typing="handleTyping"
         />
-
-        <!-- 讨论模式头部 -->
-        <div v-if="discussionMode" class="discussion-mode-header">
-          <!-- 顶部控制栏 -->
-          <div class="discussion-top-bar">
-            <button class="back-btn" @click="exitDiscussionMode" title="返回频道">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M19 12H5M12 19l-7-7 7-7"/>
-              </svg>
-            </button>
-            <span class="discussion-title">讨论群组</span>
-          </div>
-          
-          <!-- 原消息卡片 -->
-          <div v-if="rootMessage" class="root-message-card" @click="rootMessageExpanded = !rootMessageExpanded">
-            <div class="root-sender">{{ rootMessage.sender_name }}</div>
-            <div class="root-content" :class="{ expanded: rootMessageExpanded }">
-              {{ rootMessage.content }}
-            </div>
-            <div class="root-meta">
-              <span>{{ formatTime(rootMessage.created_at) }}</span>
-              <span class="expand-hint">{{ rootMessageExpanded ? '点击收起' : '点击查看完整内容' }}</span>
-            </div>
-          </div>
-        </div>
-
-        <div v-if="messageFilterType" class="filter-indicator">
-          <span>
-            <i class="el-icon-filter"></i>
-            正在筛选: {{ messageFilterType === 'image' ? '图片' : messageFilterType === 'file' ? '文件' : '链接' }}
-          </span>
-          <el-button type="text" size="small" @click="handleFilter(null)" style="margin-left: 10px">清除筛选</el-button>
-        </div>
-        
-        <!-- 消息和输入区域：包含消息列表和输入框的统一容器 -->
-        <div class="chat-container">
-          <MessageList 
-            ref="messageList"
-            :conversation-id="currentConversationId"
-            :messages="currentMessages"
-            :conversation-subtype="currentConversation?.group_subtype"
-            @load-more="loadMoreMessages"
-            @reply="handleReply"
-            @edit="handleEdit"
-            @delete="handleDelete"
-            @open-comments="handleOpenComments"
-          />
-          
-          <!-- 滚动到底部按钮 -->
-          <transition name="fade-scale">
-            <div v-if="messageList?.showScrollButton" class="scroll-bottom-container" @click="scrollToBottom">
-              <!-- 未读消息数气泡 -->
-              <div v-if="messageList?.unreadCount > 0" class="unread-bubble">
-                {{ messageList?.formattedUnreadCount }}
-              </div>
-              <!-- 圆形按钮 -->
-              <div class="down-button">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                  <polyline points="6 9 12 15 18 9"></polyline>
-                </svg>
-              </div>
-            </div>
-          </transition>
-          
-          <MessageInput 
-            ref="messageInput"
-            :conversation-id="currentConversationId"
-            :conversation-subtype="currentConversation?.group_subtype"
-            :discussion-mode="discussionMode"
-            :reply-to="replyToMessage"
-            :editing-message="editingMessage"
-            @send="handleSendMessage"
-            @cancel-reply="replyToMessage = null"
-            @cancel-edit="editingMessage = null"
-            @typing="handleTyping"
-          />
-        </div>
       </template>
       
       <div v-else class="no-conversation">
@@ -456,46 +325,37 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import io from 'socket.io-client'
 import api from '../api'
-import ConversationItem from '../components/ConversationItem.vue'
-import ChatHeader from '../components/ChatHeader.vue'
-import MessageList from '../components/MessageList.vue'
-import MessageInput from '../components/MessageInput.vue'
-import ChatInfoPanel from '../components/ChatInfoPanel.vue'
-import PinnedMessageBar from '../components/PinnedMessageBar.vue'
-import LiveStatusBanner from '../components/LiveStatusBanner.vue'
 import { eventBus } from '../utils/eventBus'
 import { formatTime } from '@/utils/timeUtils'
+
+import ConversationList from '../components/chat/ConversationList.vue'
+import ChatWindow from '../components/chat/ChatWindow.vue'
+import ChatInfoPanel from '../components/chat/ChatInfoPanel.vue'
+import LiveStatusBanner from '../components/live-class/LiveStatusBanner.vue'
 
 const route = useRoute()
 const router = useRouter()
 
-// 状态
+// ===== 状态定义 (State) =====
 const conversations = ref([])
 const currentConversationId = ref(null)
 const allMessages = ref([])
-
-const currentMessages = computed(() => {
-  if (discussionMode.value && rootMessageId.value) {
-    // 讨论模式：只显示某条消息的评论
-    return allMessages.value.filter(msg => msg.root_message_id === rootMessageId.value)
-  }
-  // 正常模式：显示所有非评论消息
-  return allMessages.value.filter(msg => !msg.root_message_id)
-})
 const showInfoPanel = ref(false)
+const isLoadingMessages = ref(false)
+const lastLessonEndRefresh = ref(0)
 const searchQuery = ref('')
 const showNewChatDialog = ref(false)
 const searchingUsers = ref(false)
 const userSearchResults = ref([])
 const replyToMessage = ref(null)
 const editingMessage = ref(null)
-const messageList = ref(null)
-const messageInput = ref(null)
+const chatWindowRef = ref(null)
+const showScrollButton = ref(false)
 const pinnedMessageBar = ref(null)
 
 // Folder refs
@@ -528,6 +388,16 @@ let socket = null
 const userId = localStorage.getItem('user_id')
 const userRole = localStorage.getItem('user_role')
 const userName = localStorage.getItem('user_name') || localStorage.getItem('real_name') || localStorage.getItem('username')
+
+// ===== 计算属性 (Computed) =====
+const currentMessages = computed(() => {
+  if (discussionMode.value && rootMessageId.value) {
+    // 讨论模式：只显示某条消息的评论
+    return allMessages.value.filter(msg => msg.root_message_id === rootMessageId.value)
+  }
+  // 正常模式：显示所有非评论消息
+  return allMessages.value.filter(msg => !msg.root_message_id)
+})
 
 // 新建对话表单
 const newChatForm = ref({
@@ -566,15 +436,6 @@ watch(totalUnreadCount, (newCount) => {
 const filteredConversations = computed(() => {
   let result = conversations.value
 
-  // Search filter
-  if (searchQuery.value) {
-    const query = searchQuery.value.toLowerCase()
-    result = result.filter(conv => {
-      return conv.title?.toLowerCase().includes(query) ||
-             conv.last_message?.content?.toLowerCase().includes(query)
-    })
-  }
-  
   // Folder filter
   if (activeFolderId.value === 'all') {
     return result
@@ -583,11 +444,8 @@ const filteredConversations = computed(() => {
   } else {
     // Custom folder
     const folder = folders.value.find(f => f.id === activeFolderId.value)
-    console.log('Current folder:', folder)
-    console.log('All conversations:', result.map(c => c.id))
     if (folder && folder.conversations) {
        // folder.conversations is list of conversation IDs
-       console.log('Folder conversations:', folder.conversations)
        return result.filter(conv => folder.conversations.includes(conv.id))
     }
     return []
@@ -626,7 +484,7 @@ onMounted(async () => {
   }
   
   // 添加全局点击事件监听，关闭右键菜单
-  document.addEventListener('click', closeAllContextMenus)
+  document.addEventListener('click', handleGlobalClick)
 })
 
 // 监听路由变化
@@ -705,7 +563,7 @@ onUnmounted(() => {
   }
   
   // 移除全局点击事件监听
-  document.removeEventListener('click', closeAllContextMenus)
+  document.removeEventListener('click', handleGlobalClick)
 })
 
 // WebSocket初始化
@@ -716,7 +574,6 @@ const initSocket = () => {
   })
   
   socket.on('connect', () => {
-    console.log('Socket connected')
     socket.emit('chat:connect', { user_id: userId })
   })
   
@@ -733,7 +590,6 @@ const initSocket = () => {
         // 只更新ID和时间，保留pending状态
         allMessages.value[tempIndex].id = data.id
         allMessages.value[tempIndex].created_at = data.created_at
-        console.log('chat:message_sent - 更新临时消息ID:', data.temp_id, '->', data.id)
       }
     }
   })
@@ -744,16 +600,16 @@ const initSocket = () => {
   
   socket.on('chat:user_typing', (data) => {
     if (data.conversation_id === currentConversationId.value && data.user_id != userId) {
-      if (messageList.value) {
-        messageList.value.setTypingUsers([data.user_name])
+      if (chatWindowRef.value?.messageListRef) {
+        chatWindowRef.value.messageListRef.setTypingUsers([data.user_name])
       }
     }
   })
   
   socket.on('chat:user_stop_typing', (data) => {
     if (data.conversation_id === currentConversationId.value) {
-      if (messageList.value) {
-        messageList.value.setTypingUsers([])
+      if (chatWindowRef.value?.messageListRef) {
+        chatWindowRef.value.messageListRef.setTypingUsers([])
       }
     }
   })
@@ -769,9 +625,14 @@ const initSocket = () => {
   // 监听课堂入口消息状态更新
   socket.on('chat:message_updated', (data) => {
     if (data.lesson_id && data.status === 'ended') {
-      // 刷新当前对话的消息以获取更新后的状态
-      if (currentConversationId.value) {
-        loadMessages(currentConversationId.value)
+      // 防抖：避免在短时间内重复刷新
+      const now = Date.now()
+      if (now - lastLessonEndRefresh.value > 5000) { // 5秒内只处理一次
+        lastLessonEndRefresh.value = now
+        // 刷新当前对话的消息以获取更新后的状态
+        if (currentConversationId.value) {
+          loadMessages(currentConversationId.value)
+        }
       }
     }
   })
@@ -791,15 +652,17 @@ const loadFolders = async () => {
     const response = await api.get('/chat/folders')
     // 后端返回格式: {code: 200, data: [...]}
     const folderData = response.data.data || response.data || []
-    console.log('Loaded folders:', folderData)
-    folders.value = folderData
+    folders.value = folderData.map(folder => ({
+      ...folder,
+      id: String(folder.id)
+    }))
   } catch (error) {
     console.error('Failed to load folders:', error)
   }
 }
 
 const handleFolderChange = (folderId) => {
-  activeFolderId.value = folderId
+  activeFolderId.value = String(folderId)
 }
 
 const deleteFolder = async (folderId) => {
@@ -850,14 +713,13 @@ const createFolder = async () => {
 
 // 加载对话列表
 const handleJumpToMessage = (messageId) => {
-  if (messageList.value) {
-    messageList.value.scrollToMessage(messageId)
+  if (chatWindowRef.value?.messageListRef) {
+    chatWindowRef.value.messageListRef.scrollToMessage(messageId)
   }
 }
 
 const handleMessageUnpinned = (message) => {
   // 可以在这里添加一些通知或者逻辑
-  console.log('Message unpinned:', message)
 }
 
 const loadConversations = async () => {
@@ -905,6 +767,13 @@ const handleFilter = (type) => {
 
 // 加载消息
 const loadMessages = async (conversationId, beforeId = null) => {
+  // 防止重复加载
+  if (isLoadingMessages.value) {
+    return
+  }
+  
+  isLoadingMessages.value = true
+  
   try {
     const params = {
       before_id: beforeId,
@@ -919,20 +788,7 @@ const loadMessages = async (conversationId, beforeId = null) => {
     // Remove null/undefined keys
     Object.keys(params).forEach(key => params[key] == null && delete params[key])
 
-    console.log('loadMessages 调用:', {
-      conversationId,
-      beforeId,
-      discussionMode: discussionMode.value,
-      rootMessageId: rootMessageId.value,
-      params
-    })
-
     const response = await api.get(`/chat/conversations/${conversationId}/messages`, { params })
-    
-    console.log('loadMessages 响应:', {
-      messagesCount: response.data.messages?.length || 0,
-      messages: response.data.messages
-    })
     
     if (beforeId) {
       // 加载更多历史消息
@@ -956,6 +812,8 @@ const loadMessages = async (conversationId, beforeId = null) => {
   } catch (error) {
     console.error('加载消息失败:', error)
     ElMessage.error('加载消息失败')
+  } finally {
+    isLoadingMessages.value = false
   }
 }
 
@@ -1029,13 +887,7 @@ const handleSendMessage = async (messageData) => {
   
   allMessages.value.push(optimisticMessage)
   
-  console.log('发送消息:', {
-    conversationId: currentConversationId.value,
-    discussionMode: discussionMode.value,
-    rootMessageId: rootMessageId.value,
-    optimisticMessage,
-    allMessagesCount: allMessages.value.length
-  })
+  // 发送消息处理
   
   // 准备发送数据
   const sendData = {
@@ -1089,14 +941,6 @@ const handleNewMessage = (message) => {
   
   // 如果是当前对话，添加到消息列表
   if (message.conversation_id === currentConversationId.value) {
-    console.log('接收到新消息:', {
-      messageId: message.id,
-      conversationId: message.conversation_id,
-      currentConversationId: currentConversationId.value,
-      discussionMode: discussionMode.value,
-      rootMessageId: rootMessageId.value,
-      messageRootId: message.root_message_id
-    })
     
     // 检查讨论模式是否匹配
     // 如果在讨论模式中，只接受当前 root_message_id 的评论
@@ -1119,14 +963,12 @@ const handleNewMessage = (message) => {
       // 第一步：查找相同ID的消息（避免重复）
       existingIndex = allMessages.value.findIndex(m => m.id === message.id && !m.pending)
       if (existingIndex !== -1) {
-        console.log('chat:new_message - 消息已存在，忽略:', message.id)
         return
       }
       
       // 第二步：查找待替换的临时消息（有pending标志）
       existingIndex = allMessages.value.findIndex(m => m.pending && m.temp_id)
       if (existingIndex !== -1) {
-        console.log('chat:new_message - 替换临时消息:', allMessages.value[existingIndex].temp_id, '->', message.id)
         // 替换临时消息
         allMessages.value.splice(existingIndex, 1, {
           ...message,
@@ -1290,21 +1132,23 @@ const createConversation = async () => {
 
 // 工具函数
 const scrollToBottom = () => {
-  if (messageList.value) {
-    messageList.value.scrollToBottom()
-  }
+  nextTick(() => {
+    if (chatWindowRef.value) {
+      chatWindowRef.value.scrollToBottom()
+    }
+  })
 }
 
 // 处理回复
 const handleReply = (message) => {
   replyToMessage.value = message
-  messageInput.value?.focus()
+  chatWindowRef.value?.messageInputRef?.focus()
 }
 
 // 处理编辑
 const handleEdit = (message) => {
   editingMessage.value = message
-  messageInput.value?.focus()
+  chatWindowRef.value?.messageInputRef?.focus()
 }
 
 // 处理删除
@@ -1331,7 +1175,7 @@ const handleDelete = async (message) => {
 // 处理打开评论
 const handleOpenComments = (message) => {
   if (!message || !message.id) return
-  
+
   // 如果已经有关联的讨论组，跳转到讨论组的讨论模式
   if (currentConversation.value?.linked_discussion_id) {
     router.push({
@@ -1341,12 +1185,13 @@ const handleOpenComments = (message) => {
         rootId: message.id
       }
     })
-  } else {
-    ElMessage.warning('该频道尚未绑定讨论组')
+  } else if (currentConversation.value?.group_subtype === 'channel') {
+    // 如果当前对话是频道，直接进入讨论模式
+    discussionMode.value = true
+    rootMessageId.value = message.id
+    loadRootMessage(message.id)
   }
 }
-
-// 退出讨论模式
 const exitDiscussionMode = () => {
   router.push({
     path: '/chat',
@@ -1411,6 +1256,16 @@ const handleHideContextMenu = () => {
 
 const closeAllContextMenus = () => {
   activeContextMenu.value = null
+}
+
+// 全局点击事件处理，点击菜单外部时关闭菜单
+const handleGlobalClick = (event) => {
+  // 检查点击是否在右键菜单内
+  const menu = document.querySelector('.context-menu-container')
+  if (menu && menu.contains(event.target)) {
+    return // 点击在菜单内，不关闭
+  }
+  closeAllContextMenus()
 }
 
 
@@ -1495,7 +1350,18 @@ const handleArchiveConversation = async (conversationId) => {
 }
 
 // 处理加入文件夹
-const handleAddToFolder = (conversationId, folderId) => {
+const handleAddToFolder = (data) => {
+  // 兼容对象参数和传统的两个参数形式
+  let conversationId, folderId
+  if (typeof data === 'object' && data.conversationId !== undefined) {
+    conversationId = data.conversationId
+    folderId = data.folderId
+  } else {
+    // 向后兼容：第一个参数是conversationId，第二个是folderId
+    conversationId = data
+    folderId = arguments[1]
+  }
+  
   if (folderId) {
     // 直接加入指定文件夹
     addConversationToFolder(folderId, conversationId)
@@ -1507,7 +1373,9 @@ const handleAddToFolder = (conversationId, folderId) => {
   }
 }
 
-const handleOpenCreateFolder = (conversationId) => {
+const handleOpenCreateFolder = (data) => {
+  // 兼容对象参数和直接传conversationId
+  const conversationId = typeof data === 'object' ? data.conversationId : data
   selectedConversationForFolder.value = conversationId
   showCreateFolderForm.value = true
   showAddToFolderDialog.value = true
@@ -1520,9 +1388,11 @@ const getConversationName = (conversationId) => {
 
 const addConversationToFolder = async (folderId, conversationId) => {
   const targetConvId = conversationId || selectedConversationForFolder.value
+  const numericFolderId = parseInt(folderId, 10)
+  const numericConvId = parseInt(targetConvId, 10)
   try {
-    await api.post(`/chat/folders/${folderId}/items`, {
-      conversation_id: targetConvId
+    const response = await api.post(`/chat/folders/${numericFolderId}/items`, {
+      conversation_id: numericConvId
     })
     ElMessage.success('已加入文件夹')
     showAddToFolderDialog.value = false
@@ -1953,88 +1823,6 @@ const updateUserOnlineStatus = (userId, isOnline) => {
   min-height: 0;
 }
 
-/* 滚动到底部按钮容器 */
-.scroll-bottom-container {
-  position: absolute;
-  /* 相对于父容器（chat-container）定位，在输入框上方20px */
-  bottom: 80px; /* 容器底padding(20px) + 输入框高度(40px) + 间距(20px) */
-  /* 右侧与发送按钮对齐：容器右padding(28px) + telegram-input右padding(8px) = 36px */
-  right: 12px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  cursor: pointer;
-  z-index: 100;
-  /* 确保按钮在所有内容之上 */
-  pointer-events: auto;
-}
-
-/* 未读消息数气泡 */
-.unread-bubble {
-  background: linear-gradient(135deg, #409eff 0%, #66b1ff 100%);
-  color: white;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 3px 9px;
-  border-radius: 12px;
-  margin-bottom: -10px; /* 关键：产生压盖效果 */
-  z-index: 2;
-  min-width: 20px;
-  text-align: center;
-  box-shadow: 0 2px 6px rgba(64, 158, 255, 0.4);
-  animation: bounceIn 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
-}
-
-/* 圆形下滑按钮 */
-.down-button {
-  background: rgba(64, 158, 255, 0.95);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  width: 46px;
-  height: 46px;
-  border-radius: 50%;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  transition: all 0.2s ease;
-  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.3);
-  z-index: 1;
-}
-
-.down-button svg {
-  color: white;
-  transition: color 0.2s;
-}
-
-.scroll-bottom-container:hover .down-button {
-  background: rgba(64, 158, 255, 1);
-  transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(64, 158, 255, 0.4);
-}
-
-.scroll-bottom-container:hover .down-button svg {
-  color: white;
-}
-
-.scroll-bottom-container:active .down-button {
-  transform: translateY(0);
-}
-
-/* 弹出动画 */
-@keyframes bounceIn {
-  0% {
-    opacity: 0;
-    transform: scale(0.3);
-  }
-  50% {
-    transform: scale(1.05);
-  }
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
 /* Vue 过渡动画 */
 .fade-scale-enter-active,
 .fade-scale-leave-active {
@@ -2300,7 +2088,7 @@ const updateUserOnlineStatus = (userId, isOnline) => {
   width: 40px;
   height: 40px;
   border-radius: 8px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #409eff 0%, #66b3ff 100%);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2539,14 +2327,3 @@ const updateUserOnlineStatus = (userId, isOnline) => {
   font-size: 11px;
 }
 </style>
-
-.filter-indicator {
-  padding: 8px 16px;
-  background-color: #f0f9eb;
-  border-bottom: 1px solid #e1f3d8;
-  color: #67c23a;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 13px;
-}

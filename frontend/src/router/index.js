@@ -1,4 +1,4 @@
-import { createRouter, createWebHistory } from 'vue-router'
+﻿import { createRouter, createWebHistory } from 'vue-router'
 
 import Login from '../views/Login.vue'
 
@@ -38,15 +38,15 @@ import GradeStatistics from '../views/teacher/GradeStatistics.vue'
 
 import TeachingPlan from '../views/teacher/TeachingPlan.vue'
 
-// Unified Online Class View
-
-import OnlineClass from '../views/OnlineClass.vue'
+import TeacherLiveClass from '../views/teacher/LiveClass.vue'
 
 
 
 // Student Grade View
 
 import MyGrades from '../views/student/MyGrades.vue'
+
+import StudentLiveClass from '../views/student/LiveClass.vue'
 
 import ActiveLiveClass from '../views/ActiveLiveClass.vue'
 
@@ -69,6 +69,8 @@ import ForumManagement from '../views/admin/ForumManagement.vue'
 // Common Views
 
 import Profile from '../views/Profile.vue'
+// 新版统一线上课堂组件
+import LiveClassRoom from '../views/LiveClassRoom.vue'
 
 
 
@@ -93,8 +95,10 @@ const routes = [
   { path: '/my-grades', component: MyGrades },
 
   { path: '/live-class/active', component: ActiveLiveClass },
+  // 新版统一线上课堂路由
+  { path: '/classroom/:lessonId', component: LiveClassRoom, props: true },
 
-  { path: '/live-class/:lessonId', component: OnlineClass, props: true },
+  { path: '/live-class/:lessonId', component: LiveClassRoom, props: true },
 
   { path: '/forum', component: Forum },
 
@@ -120,7 +124,7 @@ const routes = [
 
           { path: 'teaching-plan', component: TeachingPlan },
 
-          { path: 'live-class/:lessonId', component: OnlineClass, props: true },
+          { path: 'live-class/:lessonId', component: LiveClassRoom, props: true },
 
           { path: 'class/:id', component: TeacherClassDetail },
 
@@ -186,7 +190,7 @@ router.beforeEach((to, from, next) => {
 
  
 
-  // 未登录跳转到登录页（排除登录页本身）
+  // 鏈櫥褰曡烦杞埌鐧诲綍椤碉紙鎺掗櫎鐧诲綍椤垫湰韬級
 
   if (!token && to.path !== '/login') {
 
@@ -198,7 +202,7 @@ router.beforeEach((to, from, next) => {
 
 
 
-  // 已经登录还访问登录页，跳转到对应首页
+  // 宸茬粡鐧诲綍杩樿闂櫥褰曢〉锛岃烦杞埌瀵瑰簲棣栭〉
 
   if (token && to.path === '/login') {
 

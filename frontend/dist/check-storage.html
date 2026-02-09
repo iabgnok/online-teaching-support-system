@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>检查localStorage</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .storage-info {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h2 {
+            color: #409eff;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background: #409eff;
+            color: white;
+        }
+        .btn {
+            padding: 10px 20px;
+            background: #409eff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 20px;
+        }
+        .btn:hover {
+            background: #3a8ee6;
+        }
+        .highlight {
+            background: #fff3cd;
+            padding: 2px 4px;
+            border-radius: 2px;
+        }
+    </style>
+</head>
+<body>
+    <div class="storage-info">
+        <h2>🔍 LocalStorage 检查工具</h2>
+        
+        <div id="user-info">
+            <h3>当前用户信息：</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>键名</th>
+                        <th>值</th>
+                    </tr>
+                </thead>
+                <tbody id="storage-table">
+                </tbody>
+            </table>
+        </div>
+        
+        <div style="margin-top: 20px;">
+            <p><strong>问题诊断：</strong></p>
+            <div id="diagnosis"></div>
+        </div>
+        
+        <button class="btn" onclick="refreshStorage()">🔄 刷新</button>
+        <button class="btn" onclick="clearAndReload()">🗑️ 清除并重新登录</button>
+    </div>
+
+    <script>
+        function displayStorage() {
+            const tbody = document.getElementById('storage-table');
+            const diagnosis = document.getElementById('diagnosis');
+            tbody.innerHTML = '';
+            
+            const keys = ['user_id', 'user_name', 'username', 'real_name', 'user_role', 'user_token'];
+            const data = {};
+            
+            keys.forEach(key => {
+                const value = localStorage.getItem(key);
+                data[key] = value;
+                
+                const row = tbody.insertRow();
+                const cell1 = row.insertCell(0);
+                const cell2 = row.insertCell(1);
+                
+                cell1.textContent = key;
+                cell2.innerHTML = value ? `<span class="highlight">${value}</span>` : '<em style="color:#999">未设置</em>';
+            });
+            
+            // 诊断
+            let diagnosisHtml = '<ul>';
+            
+            if (!data.user_id) {
+                diagnosisHtml += '<li style="color:red">❌ 未登录：user_id 为空</li>';
+            } else {
+                diagnosisHtml += `<li style="color:green">✅ 已登录：user_id = ${data.user_id}</li>`;
+            }
+            
+            if (!data.user_name) {
+                diagnosisHtml += '<li style="color:orange">⚠️ user_name 未设置（将导致消息显示问题）</li>';
+            } else {
+                diagnosisHtml += `<li style="color:green">✅ user_name = ${data.user_name}</li>`;
+            }
+            
+            if (data.username && data.real_name) {
+                if (data.user_name === data.username) {
+                    diagnosisHtml += `<li style="color:orange">⚠️ user_name 使用的是 username (${data.username})，应该使用 real_name (${data.real_name})</li>`;
+                    diagnosisHtml += '<li style="color:blue">💡 建议：重新登录以修复此问题</li>';
+                } else if (data.user_name === data.real_name) {
+                    diagnosisHtml += `<li style="color:green">✅ user_name 正确使用 real_name (${data.real_name})</li>`;
+                }
+            }
+            
+            diagnosisHtml += '</ul>';
+            diagnosis.innerHTML = diagnosisHtml;
+        }
+        
+        function refreshStorage() {
+            displayStorage();
+        }
+        
+        function clearAndReload() {
+            if (confirm('确定要清除所有数据并返回登录页面吗？')) {
+                localStorage.clear();
+                window.location.href = '/';
+            }
+        }
+        
+        // 页面加载时显示
+        displayStorage();
+    </script>
+</body>
+</html>

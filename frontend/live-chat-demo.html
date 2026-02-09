@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>直播聊天模块演示</title>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <style>
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f5f5;
+    }
+
+    .demo-container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    .demo-header {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    .demo-header h1 {
+      color: #333;
+      margin-bottom: 10px;
+    }
+
+    .demo-header p {
+      color: #666;
+      font-size: 16px;
+    }
+
+    .demo-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 30px;
+      margin-bottom: 40px;
+    }
+
+    .demo-section {
+      background: white;
+      border-radius: 12px;
+      padding: 24px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+    }
+
+    .demo-section h2 {
+      color: #333;
+      margin-bottom: 20px;
+      font-size: 20px;
+    }
+
+    .component-preview {
+      border: 2px dashed #e0e0e0;
+      border-radius: 8px;
+      padding: 20px;
+      min-height: 200px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #999;
+      font-size: 16px;
+    }
+
+    .code-example {
+      background: #f8f9fa;
+      border: 1px solid #e9ecef;
+      border-radius: 8px;
+      padding: 16px;
+      margin-top: 16px;
+      font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+      font-size: 14px;
+      line-height: 1.5;
+      overflow-x: auto;
+    }
+
+    .feature-list {
+      list-style: none;
+      padding: 0;
+    }
+
+    .feature-list li {
+      padding: 8px 0;
+      border-bottom: 1px solid #f0f0f0;
+      display: flex;
+      align-items: center;
+    }
+
+    .feature-list li:before {
+      content: "✓";
+      color: #52c41a;
+      font-weight: bold;
+      margin-right: 10px;
+    }
+
+    .feature-list li:last-child {
+      border-bottom: none;
+    }
+
+    .btn {
+      background: #409eff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      margin: 5px;
+      transition: background-color 0.3s;
+    }
+
+    .btn:hover {
+      background: #337ecc;
+    }
+
+    .btn.secondary {
+      background: #6c757d;
+    }
+
+    .btn.secondary:hover {
+      background: #545b62;
+    }
+
+    @media (max-width: 768px) {
+      .demo-grid {
+        grid-template-columns: 1fr;
+        gap: 20px;
+      }
+
+      .demo-container {
+        padding: 10px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div class="demo-container">
+      <div class="demo-header">
+        <h1>🎓 直播聊天模块改进演示</h1>
+        <p>展示使用聊天组件和独立切换按钮的直播聊天功能</p>
+      </div>
+
+      <div class="demo-grid">
+        <!-- 切换按钮组件演示 -->
+        <div class="demo-section">
+          <h2>📱 聊天切换按钮组件</h2>
+          <div class="component-preview">
+            <div style="width: 100%; max-width: 300px;">
+              <!-- 这里会显示切换按钮组件 -->
+              <div id="switch-buttons-demo" style="display: flex; flex-direction: column; gap: 8px;">
+                <!-- 组件将在这里渲染 -->
+              </div>
+            </div>
+          </div>
+          <div class="code-example">
+&lt;ChatSwitchButton<br>
+&nbsp;&nbsp;tab-type="discussion"<br>
+&nbsp;&nbsp;:label="'课堂讨论'"<br>
+&nbsp;&nbsp;:unread-count="5"<br>
+&nbsp;&nbsp;:is-active="activeTab === 'discussion'"<br>
+&nbsp;&nbsp;@switch="activeTab = $event"<br>
+/&gt;
+          </div>
+        </div>
+
+        <!-- 聊天面板组件演示 -->
+        <div class="demo-section">
+          <h2>💬 直播聊天面板组件</h2>
+          <div class="component-preview">
+            <div style="width: 100%; height: 400px; border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden;">
+              <!-- 这里会显示聊天面板组件 -->
+              <div id="chat-panel-demo" style="width: 100%; height: 100%;">
+                <!-- 组件将在这里渲染 -->
+              </div>
+            </div>
+          </div>
+          <div class="code-example">
+&lt;LiveClassChatPanel<br>
+&nbsp;&nbsp;:discussion-conversation-id="discussionId"<br>
+&nbsp;&nbsp;:class-group-conversation-id="classGroupId"<br>
+&nbsp;&nbsp;:role="'student'"<br>
+&nbsp;&nbsp;:online-count="25"<br>
+&nbsp;&nbsp;@switch-tab="handleTabSwitch"<br>
+&nbsp;&nbsp;@send-message="handleSendMessage"<br>
+/&gt;
+          </div>
+        </div>
+      </div>
+
+      <!-- 功能特性列表 -->
+      <div class="demo-section">
+        <h2>✨ 主要改进特性</h2>
+        <ul class="feature-list">
+          <li><strong>组件化设计</strong> - 使用统一的聊天组件，提高代码复用性</li>
+          <li><strong>独立切换按钮</strong> - 专门设计的切换按钮组件，支持未读消息显示</li>
+          <li><strong>直播模式优化</strong> - ChatWindow组件支持直播场景的特殊需求</li>
+          <li><strong>响应式设计</strong> - 适配不同屏幕尺寸的显示效果</li>
+          <li><strong>实时状态显示</strong> - 在线人数和状态指示器</li>
+          <li><strong>多角色支持</strong> - 支持教师和学生不同的功能权限</li>
+          <li><strong>消息功能完整</strong> - 支持回复、编辑、删除、反应等完整功能</li>
+          <li><strong>折叠控制</strong> - 可折叠的聊天面板，节省屏幕空间</li>
+        </ul>
+      </div>
+
+      <!-- 使用说明 -->
+      <div class="demo-section">
+        <h2>📖 使用说明</h2>
+        <div style="line-height: 1.6; color: #555;">
+          <h3>1. 导入组件</h3>
+          <div class="code-example">
+import LiveClassChatPanel from '@/components/live-class/LiveClassChatPanel.vue'<br>
+import ChatSwitchButton from '@/components/live-class/ChatSwitchButton.vue'
+          </div>
+
+          <h3>2. 在模板中使用</h3>
+          <div class="code-example">
+&lt;LiveClassChatPanel<br>
+&nbsp;&nbsp;:discussion-conversation-id="discussionId"<br>
+&nbsp;&nbsp;:class-group-conversation-id="classGroupId"<br>
+&nbsp;&nbsp;:role="userRole"<br>
+&nbsp;&nbsp;:online-count="onlineCount"<br>
+&nbsp;&nbsp;@switch-tab="handleTabSwitch"<br>
+&nbsp;&nbsp;@send-message="handleSendMessage"<br>
+/&gt;
+          </div>
+
+          <h3>3. 必需的Props</h3>
+          <ul style="margin: 10px 0; padding-left: 20px;">
+            <li><code>discussion-conversation-id</code> - 课堂讨论对话ID</li>
+            <li><code>role</code> - 用户角色 ('teacher' | 'student')</li>
+            <li><code>messages</code> - 消息数组</li>
+          </ul>
+
+          <h3>4. 可选的Props</h3>
+          <ul style="margin: 10px 0; padding-left: 20px;">
+            <li><code>class-group-conversation-id</code> - 班级群对话ID</li>
+            <li><code>online-count</code> - 在线人数</li>
+            <li><code>is-collapsed</code> - 是否折叠</li>
+            <li><code>discussion-unread</code> - 讨论未读数</li>
+            <li><code>class-group-unread</code> - 班级群未读数</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- 控制面板 -->
+      <div class="demo-section">
+        <h2>🎮 交互控制面板</h2>
+        <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px;">
+          <button class="btn" onclick="switchToDiscussion()">切换到课堂讨论</button>
+          <button class="btn" onclick="switchToClassGroup()">切换到班级群</button>
+          <button class="btn secondary" onclick="toggleCollapse()">切换折叠状态</button>
+          <button class="btn secondary" onclick="addUnreadMessage()">添加未读消息</button>
+        </div>
+        <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; font-family: monospace;">
+          <div>当前活跃标签: <span id="current-tab">discussion</span></div>
+          <div>折叠状态: <span id="collapse-status">false</span></div>
+          <div>讨论未读数: <span id="discussion-unread">0</span></div>
+          <div>班级群未读数: <span id="class-group-unread">0</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // 模拟数据
+    let demoState = {
+      activeTab: 'discussion',
+      isCollapsed: false,
+      discussionUnread: 0,
+      classGroupUnread: 0
+    };
+
+    // 切换按钮组件
+    const ChatSwitchButton = {
+      props: ['tabType', 'label', 'unreadCount', 'isActive'],
+      emits: ['switch'],
+      template: `
+        <div class="chat-switch-button" :class="{ active: isActive }">
+          <button class="switch-btn" @click="$emit('switch', tabType)" :class="{ active: isActive }">
+            <div class="btn-content">
+              <div class="icon-wrapper">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path v-if="tabType === 'discussion'" d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                  <path v-else d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                  <circle v-if="tabType !== 'discussion'" cx="9" cy="7" r="4"></circle>
+                  <path v-if="tabType !== 'discussion'" d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                  <path v-if="tabType !== 'discussion'" d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                </svg>
+              </div>
+              <div class="text-content">
+                <span class="label">{{ label }}</span>
+                <span v-if="unreadCount > 0" class="unread-indicator">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
+              </div>
+            </div>
+            <div v-if="isActive" class="active-indicator"></div>
+          </button>
+        </div>
+      `
+    };
+
+    // 聊天面板组件（简化版）
+    const LiveClassChatPanel = {
+      props: ['activeTab', 'isCollapsed', 'discussionUnread', 'classGroupUnread', 'onlineCount'],
+      template: `
+        <div class="live-class-chat-panel" :class="{ collapsed: isCollapsed }">
+          <div class="chat-switcher">
+            <chat-switch-button
+              tab-type="discussion"
+              label="课堂讨论"
+              :unread-count="discussionUnread"
+              :is-active="activeTab === 'discussion'"
+              @switch="$emit('switch-tab', $event)"
+            />
+            <chat-switch-button
+              tab-type="classGroup"
+              label="班级群聊"
+              :unread-count="classGroupUnread"
+              :is-active="activeTab === 'classGroup'"
+              @switch="$emit('switch-tab', $event)"
+            />
+          </div>
+          <div class="chat-content" v-show="!isCollapsed">
+            <div class="online-status-bar">
+              <div class="status-indicator">
+                <div class="online-dot active"></div>
+                <span class="status-text">{{ activeTab === 'discussion' ? '课堂讨论' : '班级群聊' }}</span>
+              </div>
+              <div class="online-count">
+                👥 {{ onlineCount }} 人在线
+              </div>
+            </div>
+            <div class="chat-window-container">
+              <div class="chat-placeholder">
+                <div style="text-align: center; color: #999; padding: 40px;">
+                  <div style="font-size: 48px; margin-bottom: 16px;">💬</div>
+                  <div>{{ activeTab === 'discussion' ? '课堂讨论区域' : '班级群聊区域' }}</div>
+                  <div style="font-size: 14px; margin-top: 8px;">这里将显示ChatWindow组件</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="panel-controls">
+            <button class="collapse-btn" @click="$emit('toggle-collapse')" :title="isCollapsed ? '展开' : '收起'">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ rotated: isCollapsed }">
+                <polyline points="15 18 9 12 15 6"></polyline>
+              </svg>
+            </button>
+          </div>
+        </div>
+      `,
+      components: {
+        ChatSwitchButton
+      }
+    };
+
+    // 创建Vue应用
+    const app = Vue.createApp({
+      components: {
+        ChatSwitchButton,
+        LiveClassChatPanel
+      },
+      data() {
+        return {
+          activeTab: 'discussion',
+          isCollapsed: false,
+          discussionUnread: 0,
+          classGroupUnread: 0,
+          onlineCount: 25
+        }
+      },
+      methods: {
+        handleTabSwitch(tab) {
+          this.activeTab = tab;
+          this.updateDisplay();
+        },
+        handleToggleCollapse() {
+          this.isCollapsed = !this.isCollapsed;
+          this.updateDisplay();
+        },
+        addUnreadMessage() {
+          if (this.activeTab === 'discussion') {
+            this.discussionUnread += 1;
+          } else {
+            this.classGroupUnread += 1;
+          }
+          this.updateDisplay();
+        },
+        updateDisplay() {
+          document.getElementById('current-tab').textContent = this.activeTab;
+          document.getElementById('collapse-status').textContent = this.isCollapsed;
+          document.getElementById('discussion-unread').textContent = this.discussionUnread;
+          document.getElementById('class-group-unread').textContent = this.classGroupUnread;
+        }
+      },
+      mounted() {
+        this.updateDisplay();
+      }
+    });
+
+    // 挂载应用
+    app.mount('#app');
+
+    // 全局函数供按钮调用
+    window.switchToDiscussion = () => {
+      app._instance.data.activeTab = 'discussion';
+      app._instance.updateDisplay();
+    };
+
+    window.switchToClassGroup = () => {
+      app._instance.data.activeTab = 'classGroup';
+      app._instance.updateDisplay();
+    };
+
+    window.toggleCollapse = () => {
+      app._instance.handleToggleCollapse();
+    };
+
+    window.addUnreadMessage = () => {
+      app._instance.addUnreadMessage();
+    };
+  </script>
+
+  <style>
+    /* 组件样式 */
+    .chat-switch-button {
+      position: relative;
+    }
+
+    .switch-btn {
+      width: 100%;
+      padding: 12px 16px;
+      border: none;
+      background: transparent;
+      color: #666;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      border-radius: 8px;
+    }
+
+    .switch-btn:hover {
+      background: rgba(64, 158, 255, 0.1);
+      color: #409eff;
+    }
+
+    .switch-btn.active {
+      background: #409eff;
+      color: white;
+    }
+
+    .btn-content {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .icon-wrapper {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .switch-btn:not(.active) .icon-wrapper {
+      background: rgba(0, 0, 0, 0.05);
+    }
+
+    .text-content {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .label {
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    .unread-indicator {
+      background: #ff4d4f;
+      color: white;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 10px;
+    }
+
+    .switch-btn.active .unread-indicator {
+      background: rgba(255, 255, 255, 0.9);
+      color: #409eff;
+    }
+
+    .active-indicator {
+      position: absolute;
+      left: 0;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 3px;
+      height: 60%;
+      background: white;
+      border-radius: 0 2px 2px 0;
+    }
+
+    .live-class-chat-panel {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+      overflow: hidden;
+    }
+
+    .chat-switcher {
+      display: flex;
+      background: #f8f9fa;
+      border-bottom: 1px solid #e9ecef;
+      padding: 8px;
+      gap: 4px;
+    }
+
+    .chat-content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .online-status-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 16px;
+      background: #f8f9fa;
+      border-bottom: 1px solid #e9ecef;
+      font-size: 13px;
+      color: #666;
+    }
+
+    .status-indicator {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .online-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #ccc;
+    }
+
+    .online-dot.active {
+      background: #52c41a;
+    }
+
+    .chat-window-container {
+      flex: 1;
+      overflow: hidden;
+    }
+
+    .chat-placeholder {
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .panel-controls {
+      display: flex;
+      justify-content: flex-end;
+      padding: 8px;
+      background: #f8f9fa;
+      border-top: 1px solid #e9ecef;
+    }
+
+    .collapse-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      border: none;
+      background: transparent;
+      color: #666;
+      cursor: pointer;
+      border-radius: 6px;
+      transition: all 0.2s ease;
+    }
+
+    .collapse-btn:hover {
+      background: rgba(64, 158, 255, 0.1);
+      color: #409eff;
+    }
+
+    .rotated {
+      transform: rotate(180deg);
+    }
+  </style>
+</body>
+</html>
