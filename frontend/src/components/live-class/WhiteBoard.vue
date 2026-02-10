@@ -1,7 +1,7 @@
 <template>
   <div class="whiteboard-container">
     <!-- 左侧工具栏 -->
-    <div v-if="!readonly" class="toolbar-left">
+    <div class="toolbar-left" :class="{ 'readonly': readonly }">
       <!-- 绘图工具组 -->
       <div class="tool-group">
         <div class="tool-group-label">绘图</div>
@@ -225,44 +225,61 @@
     
     <!-- 画布区域 -->
     <div class="canvas-area" :class="{ 'readonly': readonly }">
-      <!-- 背景图片层 -->
-      <img 
-        v-if="backgroundImage" 
-        :src="backgroundImage" 
-        class="canvas-background"
-        @load="onBackgroundLoad"
-      />
-      
-      <!-- 主画布 -->
-      <canvas
-        ref="mainCanvas"
-        class="main-canvas"
-        @mousedown="handleMouseDown"
-        @mousemove="handleMouseMove"
-        @mouseup="handleMouseUp"
-        @mouseleave="handleMouseUp"
-        @touchstart.prevent="handleTouchStart"
-        @touchmove.prevent="handleTouchMove"
-        @touchend="handleTouchEnd"
-      ></canvas>
-      
-      <!-- 临时画布（用于形状预览） -->
-      <canvas
-        ref="tempCanvas"
-        class="temp-canvas"
-      ></canvas>
-      
-      <!-- 文本输入框 -->
-      <textarea
-        v-if="isTextEditing"
-        ref="textInput"
-        v-model="textContent"
-        class="text-input"
-        :style="textInputStyle"
-        @blur="finishTextInput"
-        @keydown.enter.exact="finishTextInput"
-        @keydown.esc="cancelTextInput"
-      ></textarea>
+      <!-- 画布包装器 (承载位移和缩放) -->
+      <div 
+        class="canvas-wrapper" 
+        :style="{
+          transform: `translate(${offsetX}px, ${offsetY}px) scale(${scale})`,
+          transformOrigin: '0 0'
+        }"
+      >
+        <!-- 画板视口 (Viewport) -->
+        <div class="whiteboard-viewport">
+          <!-- 背景图片层 -->
+          <img 
+            v-if="backgroundImage" 
+            :src="backgroundImage" 
+            class="canvas-background"
+            @load="onBackgroundLoad"
+          />
+          
+          <!-- 画布变换容器 (只包含画布，不包含其他UI) -->
+          <div 
+            class="canvas-transform-wrapper"
+            :style="canvasTransformStyle"
+          >
+            <!-- 主画布 -->
+            <canvas
+              ref="mainCanvas"
+              class="main-canvas"
+              @mousedown="handleMouseDown"
+              @mousemove="handleMouseMove"
+              @mouseup="handleMouseUp"
+              @mouseleave="handleMouseUp"
+              @wheel="handleWheel"
+              @contextmenu.prevent="handleContextMenu"
+            ></canvas>
+            
+            <!-- 临时画布（用于形状预览） -->
+            <canvas
+              ref="tempCanvas"
+              class="temp-canvas"
+            ></canvas>
+          </div>
+          
+          <!-- 文本输入框 (不随画布变换) -->
+          <textarea
+            v-if="isTextEditing"
+            ref="textInput"
+            v-model="textContent"
+            class="text-input"
+            :style="textInputStyle"
+            @blur="finishTextInput"
+            @keydown.enter.exact="finishTextInput"
+            @keydown.esc="cancelTextInput"
+          ></textarea>
+        </div>
+      </div>
       
       <!-- 只读模式提示 -->
       <div v-if="readonly" class="readonly-overlay">
@@ -277,7 +294,7 @@
           <line x1="5" y1="12" x2="19" y2="12"></line>
         </svg>
       </button>
-      <span class="zoom-value">{{ Math.round(zoomLevel * 100) }}%</span>
+      <span class="zoom-value">{{ Math.round(scale * 100) }}%</span>
       <button class="zoom-btn" @click="zoomIn" title="放大">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <line x1="12" y1="5" x2="12" y2="19"></line>
@@ -330,12 +347,18 @@ export default {
     const brushSize = ref(3)
     const showColorPicker = ref(false)
     const backgroundImage = ref(null)
-    const zoomLevel = ref(1)
+    
+    // 视口变换参数
+    const offsetX = ref(0)
+    const offsetY = ref(0)
+    const scale = ref(1)
     
     // 绘制状态
     const isDrawing = ref(false)
+    const isPanning = ref(false) // 新增：是否正在平移
     const startPoint = reactive({ x: 0, y: 0 })
     const lastPoint = reactive({ x: 0, y: 0 })
+    const panStartPoint = reactive({ x: 0, y: 0 }) // 新增：平移开始点
     
     // 文本输入
     const isTextEditing = ref(false)
@@ -366,10 +389,17 @@ export default {
     const canRedo = computed(() => historyIndex.value < history.value.length - 1)
     
     const textInputStyle = computed(() => ({
-      left: textPosition.x + 'px',
-      top: textPosition.y + 'px',
+      left: (textPosition.x * scale.value + offsetX.value) + 'px',
+      top: (textPosition.y * scale.value + offsetY.value) + 'px',
       color: currentColor.value,
-      fontSize: brushSize.value * 4 + 'px'
+      fontSize: (brushSize.value * 4 * scale.value) + 'px',
+      transform: `scale(${1/scale.value})`,
+      transformOrigin: 'top left'
+    }))
+    
+    const canvasTransformStyle = computed(() => ({
+      // 变换已移至canvas-wrapper，这里不再需要
+      transform: 'none'
     }))
     
     // ========== Canvas Context ==========
@@ -378,42 +408,31 @@ export default {
     
     // ========== Methods ==========
     const initCanvas = () => {
-      if (!mainCanvas.value || !tempCanvas.value) return
+      if (!mainCanvas.value || !tempCanvas.value) {
+        // 如果 canvas 元素还没有准备好，延迟重试
+        setTimeout(() => {
+          if (!ctx) initCanvas()
+        }, 100)
+        return
+      }
       
       ctx = mainCanvas.value.getContext('2d', { willReadFrequently: true })
       tempCtx = tempCanvas.value.getContext('2d', { willReadFrequently: true })
       
-      resizeCanvas()
-      window.addEventListener('resize', resizeCanvas)
-      
-      // 保存初始状态
-      saveHistory()
-    }
-    
-    const resizeCanvas = () => {
-      if (!mainCanvas.value) return
-      
-      const container = mainCanvas.value.parentElement
-      const rect = container.getBoundingClientRect()
-      
-      // 保存当前内容
-      const imageData = ctx ? ctx.getImageData(0, 0, mainCanvas.value.width, mainCanvas.value.height) : null
-      
-      mainCanvas.value.width = rect.width
-      mainCanvas.value.height = rect.height
-      tempCanvas.value.width = rect.width
-      tempCanvas.value.height = rect.height
-      
-      // 恢复内容
-      if (imageData && ctx) {
-        ctx.putImageData(imageData, 0, 0)
-      }
+      // 设置固定的逻辑分辨率，不再随窗口变化
+      mainCanvas.value.width = 1920
+      mainCanvas.value.height = 1080
+      tempCanvas.value.width = 1920
+      tempCanvas.value.height = 1080
       
       // 重新设置画布样式
       if (ctx) {
         ctx.lineCap = 'round'
         ctx.lineJoin = 'round'
       }
+      
+      // 保存初始状态
+      saveHistory()
     }
     
     const setTool = (tool) => {
@@ -435,17 +454,38 @@ export default {
     }
     
     const getEventPoint = (e) => {
-      const rect = mainCanvas.value.getBoundingClientRect()
+      if (!mainCanvas.value) return { x: 0, y: 0 }
+
+      // 获取whiteboard-container的边界作为视口
+      const whiteboardRef = mainCanvas.value.closest('.whiteboard-container')
+      if (!whiteboardRef) return { x: 0, y: 0 }
+      
+      const rect = whiteboardRef.getBoundingClientRect()
       const clientX = e.touches ? e.touches[0].clientX : e.clientX
       const clientY = e.touches ? e.touches[0].clientY : e.clientY
-      return {
-        x: (clientX - rect.left) / zoomLevel.value,
-        y: (clientY - rect.top) / zoomLevel.value
-      }
+      
+      // 1. 计算鼠标相对于视口左上角的距离
+      const xInViewport = clientX - rect.left
+      const yInViewport = clientY - rect.top
+
+      // 2. 减去偏移量，再除以缩放比例，得到画布上的绝对坐标
+      const logicalX = (xInViewport - offsetX.value) / scale.value
+      const logicalY = (yInViewport - offsetY.value) / scale.value
+      
+      return { x: logicalX, y: logicalY }
     }
     
     const handleMouseDown = (e) => {
-      if (props.readonly) return
+      if (props.readonly || !ctx) return
+
+      // 检查是否为右键点击（平移模式）
+      if (e.button === 2) {
+        isPanning.value = true
+        panStartPoint.x = e.clientX - offsetX.value
+        panStartPoint.y = e.clientY - offsetY.value
+        mainCanvas.value.style.cursor = 'grabbing'
+        return
+      }
 
       const point = getEventPoint(e)
       startPoint.x = point.x
@@ -476,7 +516,14 @@ export default {
     }
     
     const handleMouseMove = (e) => {
-      if (!isDrawing.value || props.readonly) return
+      // 处理平移
+      if (isPanning.value) {
+        offsetX.value = e.clientX - panStartPoint.x
+        offsetY.value = e.clientY - panStartPoint.y
+        return
+      }
+
+      if (!isDrawing.value || props.readonly || !ctx) return
 
       const point = getEventPoint(e)
 
@@ -498,6 +545,13 @@ export default {
     }
     
     const handleMouseUp = (e) => {
+      // 结束平移模式
+      if (isPanning.value) {
+        isPanning.value = false
+        mainCanvas.value.style.cursor = 'crosshair'
+        return
+      }
+
       if (!isDrawing.value || props.readonly) return
 
       const point = getEventPoint(e)
@@ -531,13 +585,33 @@ export default {
     const handleTouchMove = (e) => handleMouseMove(e)
     const handleTouchEnd = (e) => handleMouseUp(e)
     
+    const handleWheel = (e) => {
+      if (props.readonly) return
+      
+      // Ctrl+滚轮缩放
+      if (e.ctrlKey) {
+        e.preventDefault() // 阻止浏览器默认的页面缩放
+        const delta = e.deltaY > 0 ? -0.1 : 0.1
+        handleZoomAtPoint(e.clientX, e.clientY, delta)
+      }
+    }
+    
+    const handleContextMenu = (e) => {
+      // 右键菜单已通过 @contextmenu.prevent 阻止
+      // 此函数为占位符，确保事件绑定正确
+    }
+    
     const beginPath = (point) => {
+      if (!ctx) return
+      
       ctx.beginPath()
       ctx.moveTo(point.x, point.y)
       applyToolStyle()
     }
     
     const applyToolStyle = () => {
+      if (!ctx) return
+      
       if (currentTool.value === 'eraser') {
         ctx.globalCompositeOperation = 'destination-out'
         ctx.strokeStyle = 'rgba(0,0,0,1)'
@@ -556,6 +630,8 @@ export default {
     }
     
     const drawLine = (from, to) => {
+      if (!ctx) return
+      
       applyToolStyle()
       ctx.beginPath()
       ctx.moveTo(from.x, from.y)
@@ -1037,16 +1113,41 @@ export default {
     }
     
     // 缩放
+    const handleZoomAtPoint = (clientX, clientY, delta) => {
+      // 获取whiteboard-container的边界作为视口
+      const whiteboardRef = mainCanvas.value.closest('.whiteboard-container')
+      if (!whiteboardRef) return
+      
+      const rect = whiteboardRef.getBoundingClientRect()
+      const viewportX = clientX - rect.left
+      const viewportY = clientY - rect.top
+      
+      // 计算缩放前的画布坐标
+      const oldScale = scale.value
+      const canvasX = (viewportX - offsetX.value) / oldScale
+      const canvasY = (viewportY - offsetY.value) / oldScale
+      
+      // 应用缩放
+      const newScale = Math.max(0.1, Math.min(5, oldScale + delta))
+      scale.value = newScale
+      
+      // 调整偏移以保持缩放中心点不变
+      offsetX.value = viewportX - canvasX * newScale
+      offsetY.value = viewportY - canvasY * newScale
+    }
+    
     const zoomIn = () => {
-      zoomLevel.value = Math.min(zoomLevel.value + 0.1, 3)
+      scale.value = Math.min(scale.value + 0.1, 3)
     }
     
     const zoomOut = () => {
-      zoomLevel.value = Math.max(zoomLevel.value - 0.1, 0.5)
+      scale.value = Math.max(scale.value - 0.1, 0.5)
     }
     
     const resetZoom = () => {
-      zoomLevel.value = 1
+      scale.value = 1
+      offsetX.value = 0
+      offsetY.value = 0
     }
     
     // Socket通信
@@ -1236,8 +1337,17 @@ export default {
     }
     
     // ========== Lifecycle ==========
+    watch([mainCanvas, tempCanvas], ([newMain, newTemp]) => {
+      if (newMain && newTemp && !ctx) {
+        initCanvas()
+      }
+    }, { immediate: true })
+    
     onMounted(() => {
-      initCanvas()
+      // 额外延迟确保 DOM 完全准备好
+      setTimeout(() => {
+        if (!ctx) initCanvas()
+      }, 200)
       window.addEventListener('keydown', handleKeyDown)
 
       // 监听Socket事件
@@ -1396,7 +1506,9 @@ export default {
       brushSize,
       showColorPicker,
       backgroundImage,
-      zoomLevel,
+      scale,
+      offsetX,
+      offsetY,
       isTextEditing,
       textContent,
       
@@ -1404,14 +1516,18 @@ export default {
       canUndo,
       canRedo,
       textInputStyle,
+      canvasTransformStyle, // 新增：画布变换样式
       colorPalette,
       
       // Methods
       setTool,
       selectColor,
+      getEventPoint,
       handleMouseDown,
       handleMouseMove,
       handleMouseUp,
+      handleWheel,
+      handleContextMenu, // 新增：右键菜单处理
       handleTouchStart,
       handleTouchMove,
       handleTouchEnd,
@@ -1424,6 +1540,7 @@ export default {
       handleImageUpload,
       onBackgroundLoad,
       downloadCanvas,
+      handleZoomAtPoint, // 新增：指定点缩放
       zoomIn,
       zoomOut,
       resetZoom,
@@ -1441,6 +1558,7 @@ export default {
 
 <style scoped>
 .whiteboard-container {
+  position: relative;
   display: flex;
   flex: 1;
   min-height: 0;
@@ -1452,6 +1570,7 @@ export default {
 
 /* 左侧工具栏 */
 .toolbar-left {
+  flex-shrink: 0;
   width: 72px;
   background: var(--bg-card);
   border-right: 1px solid var(--border-color);
@@ -1460,8 +1579,8 @@ export default {
   padding: 12px 8px;
   gap: 8px;
   overflow-y: auto;
-  flex-shrink: 0;
-  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.05);
+  z-index: 10; /* 工具栏最高层级，悬浮在视口之上 */
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.1);
 }
 
 .toolbar-left::-webkit-scrollbar {
@@ -1473,8 +1592,9 @@ export default {
   border-radius: 2px;
 }
 
-.toolbar-left::-webkit-scrollbar-thumb:hover {
-  background: var(--text-tertiary);
+.toolbar-left.readonly {
+  opacity: 0.5;
+  pointer-events: none;
 }
 
 .tool-group {
@@ -1636,13 +1756,33 @@ export default {
 .canvas-area {
   flex: 1;
   position: relative;
-  background: #fff;
+  background: #f9f7f7; /* 深灰色背景，表示画布外区域 */
   overflow: hidden;
   min-height: 300px;
 }
 
 .canvas-area.readonly {
   cursor: default;
+}
+
+/* 画板视口 (Viewport) */
+.whiteboard-viewport {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #5d5c5c; /* 画布区域为白色 */
+  z-index: 5; /* 视口层级 */
+}
+
+/* 画布变换容器 (只包含画布，不包含其他UI) */
+.canvas-transform-wrapper {
+  position: relative;
+  width: 1920px;  /* 必须与逻辑宽度一致 */
+  height: 1080px; /* 必须与逻辑高度一致 */
+  transform-origin: top left;
+  background: #f9f7f7;
+  z-index: 2; /* 画布层级 */
 }
 
 .canvas-background {
@@ -1653,7 +1793,7 @@ export default {
   height: 100%;
   object-fit: contain;
   pointer-events: none;
-  z-index: 1;
+  z-index: 1; /* 背景层级 */
 }
 
 .main-canvas,
@@ -1666,18 +1806,18 @@ export default {
 }
 
 .main-canvas {
-  z-index: 2;
+  z-index: 1; /* 相对于canvas-container */
   cursor: crosshair;
 }
 
 .temp-canvas {
-  z-index: 3;
+  z-index: 2; /* 临时画布在主画布之上 */
   pointer-events: none;
 }
 
 .text-input {
   position: absolute;
-  z-index: 10;
+  z-index: 5; /* 相对于canvas-container，文本输入在画布之上 */
   border: 2px dashed #409eff;
   background: rgba(255, 255, 255, 0.9);
   padding: 4px 8px;
