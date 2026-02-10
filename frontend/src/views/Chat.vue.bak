@@ -5,6 +5,9 @@
     
     <!-- 左侧：对话列表 -->
     <div class="chat-sidebar">
+      <div class="sidebar-header" style="display:flex; justify-content:space-between; align-items:center; padding:8px">
+        <!-- 横幅已移除（对话与联系人入口已整合到新建对话功能中） -->
+      </div>
       <ConversationList
         :conversations="conversations"
         :current-conversation-id="currentConversationId"
@@ -90,222 +93,113 @@
     <el-dialog 
       v-model="showNewChatDialog" 
       title="新建对话" 
-      width="600px"
+      width="500px"
+      :destroy-on-close="false"
     >
-      <el-tabs v-model="activeNewChatTab" type="card">
-        <!-- 新建联系人 -->
+      <el-form :model="newChatForm" label-width="100px">
+      <el-tabs v-model="newChatTab" type="card" :key="showNewChatDialog ? 'open' : 'closed'">
+        <!-- 新建联系人 Tab -->
         <el-tab-pane label="新建联系人" name="contact">
-          <div class="contact-creation">
-            <el-input 
-              v-model="contactSearchQuery" 
-              placeholder="搜索用户" 
-              @input="searchContacts"
+          <el-form-item label="搜索用户">
+            <el-input
+              v-model="contactSearchQuery"
+              placeholder="输入用户名或真实姓名进行搜索"
+              @input="onContactQueryChange"
               clearable
             />
-
-            <div v-if="contactSearching" class="searching">搜索中...</div>
-
-            <!-- 搜索结果（可选中） -->
-            <div v-else-if="contactSearchResults.length > 0" class="search-results">
-              <div 
-                v-for="user in contactSearchResults" 
-                :key="user.id" 
-                :class="['search-item', { selected: selectedSearchUser && selectedSearchUser.id === user.id }]"
-                @click="selectSearchUser(user)"
-              >
-                <div class="user-info">
-                  <el-avatar :size="32" :src="user.avatar_url">{{ user.real_name?.[0] || user.username?.[0] }}</el-avatar>
-                  <div class="user-details">
-                    <div class="name">{{ user.real_name || user.username }}</div>
-                    <div class="meta">@{{ user.username }} • {{ user.role }}</div>
-                  </div>
-                </div>
-                <div class="select-indicator" v-if="selectedSearchUser && selectedSearchUser.id === user.id">已选择</div>
-              </div>
-            </div>
-
-            <div v-else-if="contactSearchQuery && !contactSearching" class="no-results">
-              没有找到用户
-            </div>
-
-            <!-- 已有联系人与请求 -->
-            <div class="contacts-requests">
-              <div class="contacts-column">
-                <h4>我的联系人</h4>
-                <div v-if="contactsLoading" class="loading">加载中...</div>
-                <div v-else>
-                  <div v-if="contacts.length === 0" class="empty">您还没有联系人</div>
-                  <el-row :gutter="12">
-                    <el-col :span="24" v-for="c in contacts" :key="c.id">
-                      <el-card class="contact-card" shadow="hover">
-                        <div class="contact-card-content" @click.prevent.stop="startPrivateChat(c.id)">
-                          <div style="display:flex; align-items:center; gap:12px">
-                            <div style="position:relative">
-                              <el-avatar :size="40" :src="c.avatar_url">{{ (c.real_name || c.username || '').slice(0,1) }}</el-avatar>
-                              <span v-if="isOnline(c.id)" class="status-dot online"></span>
-                              <span v-else class="status-dot offline" title="离线"></span>
-                            </div>
-                            <div style="flex:1; min-width:0;">
-                              <div style="font-weight:600">{{ c.display_name || c.real_name }}</div>
-                              <div class="meta">@{{ c.username }} • {{ c.role }}</div>
-                              <div class="meta" style="margin-top:6px; color:#909399">{{ c.last_message || '' }}</div>
-                            </div>
-                          </div>
-                        </div>
-                      </el-card>
-                    </el-col>
-                  </el-row>
-                </div>
-              </div>
-
-              <div class="requests-column">
-                <h4>收到的请求</h4>
-                <div v-if="incoming.length === 0">没有收到新的请求</div>
-                <el-row :gutter="12">
-                  <el-col :span="24" v-for="r in incoming" :key="r.id">
-                  <el-card class="request-card" shadow="never">
-                    <div class="request-card-inner">
-                      <div class="request-info">
-                        <div><strong>From {{ r.requester_name || r.requester_id }}</strong></div>
-                        <!-- 隐藏默认消息文本 -->
-                        <div class="msg" v-if="r.message && r.message !== '我想添加你为联系人'">{{ r.message }}</div>
-                      </div>
-
-                      <div class="request-actions">
-                        <el-button size="small" type="primary" @click="confirmAcceptRequest(r.id)">接受</el-button>
-                        <el-button size="small" type="danger" plain @click="confirmDeclineRequest(r.id)">拒绝</el-button>
-                      </div>
-                    </div>
-                  </el-card>
-                </el-col>
-                </el-row>
-
-                <h4 style="margin-top: 12px">我发送的请求</h4>
-                <div v-if="outgoing.length === 0">没有未决的请求</div>
-                <div v-for="r in outgoing" :key="r.id" class="request-item">
-                  <div class="r-left">
-                    <div><strong>To {{ r.target_name || r.target_id }} </strong></div>
-                    <div class="msg">{{ r.message }}</div>
-                  </div>
-                  <div class="r-actions">
-                    <span class="status">{{ r.status }}</span>
-                  </div>
+            <div v-if="contactSearchResults.length" class="search-results" style="margin-top:8px">
+              <div class="contact-results">
+                <div v-for="u in contactSearchResults" :key="u.id" @click="selectContact(u)" style="padding:8px; cursor:pointer; border-bottom:1px solid #f5f7fa">
+                  <div style="font-weight:600">{{ u.real_name }} <span style="color:#8492a6">(@{{ u.username }})</span></div>
+                  <div style="color:#909399; font-size:12px">{{ u.role }}</div>
                 </div>
               </div>
             </div>
 
-          </div>
+            <div v-if="selectedContactUser" style="margin-top:12px">
+              <div style="display:flex; gap:12px; align-items:center">
+                <el-avatar :size="48">{{ (selectedContactUser.real_name || selectedContactUser.username || '').slice(0,1) }}</el-avatar>
+                <div>
+                  <div style="font-weight:600">{{ selectedContactUser.real_name }}</div>
+                  <div class="meta">@{{ selectedContactUser.username }} • {{ selectedContactUser.role }}</div>
+                </div>
+              </div>
+
+              <el-form-item label="备注名" style="margin-top:12px">
+                <el-input v-model="contactAlias" placeholder="给该联系人添加备注名（可选）" />
+              </el-form-item>
+
+              <el-form-item label="请求消息">
+                <el-input type="textarea" v-model="contactMessage" rows="3" placeholder="填写一条请求消息（可选）" />
+              </el-form-item>
+            </div>
+          </el-form-item>
         </el-tab-pane>
 
-        <!-- 新建群组 -->
+        <!-- 新建群组 Tab（复用原有群组选项） -->
         <el-tab-pane label="新建群组" name="group">
-          <el-form :model="newChatForm" label-width="100px">
-            <!-- 群组类型 -->
-            <el-form-item label="群组类型">
-              <el-radio-group v-model="newChatForm.type" @change="handleTypeChange">
-                <el-radio label="private">👤 私聊</el-radio>
-                <el-radio label="group">👥 群聊</el-radio>
-                <el-radio label="class_group" :disabled="userRole !== 'teacher'">🏫 班级群</el-radio>
-                <el-radio label="course_group" :disabled="userRole !== 'teacher'">📚 课程群</el-radio>
-              </el-radio-group>
-              <div v-if="userRole === 'student'" class="form-hint">
-                <span style="color: #909399;">学生可以创建私聊和群聊</span>
-              </div>
-            </el-form-item>
-            
-            <el-form-item v-if="newChatForm.type === 'group'" label="群组名称">
-              <el-input v-model="newChatForm.title" placeholder="输入群组名称" />
-            </el-form-item>
-            
-            <el-form-item v-if="newChatForm.type === 'class_group' || newChatForm.type === 'course_group'" label="选择班级">
-              <el-select 
-                v-model="newChatForm.classId" 
-                filterable 
-                placeholder="选择班级"
-                style="width: 100%"
-                @focus="loadClasses"
-              >
-                <el-option
-                  v-for="cls in classList"
-                  :key="cls.class_id"
-                  :label="cls.class_name"
-                  :value="cls.class_id"
-                />
-              </el-select>
-              <div class="form-hint">
-                <span v-if="newChatForm.type === 'class_group'">班级群将自动添加所有学生和教师</span>
-                <span v-else>课程群只包含教师，用于教学讨论</span>
-              </div>
-            </el-form-item>
-            
-            <el-form-item v-if="newChatForm.type === 'private' || newChatForm.type === 'group'" label="添加成员">
-              <el-select 
-                v-model="newChatForm.members" 
-                multiple 
-                filterable 
-                remote
-                reserve-keyword
-                placeholder="搜索用户"
-                :remote-method="searchUsers"
-                :loading="searchingUsers"
-                style="width: 100%"
-              >
-                <el-option
-                  v-for="user in userSearchResults"
-                  :key="user.id"
-                  :label="`${user.real_name} (${user.username})`"
-                  :value="user.id"
-                >
-                  <span>{{ user.real_name }}</span>
-                  <span style="float: right; color: #8492a6; font-size: 13px">
-                    {{ user.username }}
-                  </span>
-                </el-option>
-              </el-select>
-            </el-form-item>
-          </el-form>
+          <el-form-item label="群组类型">
+            <el-radio-group v-model="newChatForm.type" @change="handleTypeChange">
+              <el-radio label="private">👤 私聊</el-radio>
+              <el-radio label="group">👥 群聊</el-radio>
+              <el-radio label="class_group" :disabled="userRole !== 'teacher'">🏫 班级群</el-radio>
+              <el-radio label="course_group" :disabled="userRole !== 'teacher'">📚 课程群</el-radio>
+            </el-radio-group>
+            <div v-if="userRole === 'student'" class="form-hint">
+              <span style="color: #909399;">学生可以创建私聊和群聊</span>
+            </div>
+          </el-form-item>
+
+          <el-form-item v-if="newChatForm.type === 'group'" label="群组名称">
+            <el-input v-model="newChatForm.title" placeholder="输入群组名称" />
+          </el-form-item>
+
+          <el-form-item v-if="newChatForm.type === 'class_group' || newChatForm.type === 'course_group'" label="选择班级">
+            <el-select v-model="newChatForm.classId" filterable placeholder="选择班级" style="width:100%" @focus="loadClasses">
+              <el-option v-for="cls in classList" :key="cls.class_id" :label="cls.class_name" :value="cls.class_id" />
+            </el-select>
+            <div class="form-hint">
+              <span v-if="newChatForm.type === 'class_group'">班级群将自动添加所有学生和教师</span>
+              <span v-else>课程群只包含教师，用于教学讨论</span>
+            </div>
+          </el-form-item>
+
+          <el-form-item v-if="newChatForm.type === 'private'" label="联系人">
+            <el-select v-model="newChatForm.members" filterable placeholder="从联系人选择或搜索" @focus="loadContactsForNewChat" style="width:100%" :multiple="false">
+              <el-option v-for="c in contactsForNewChat" :key="c.id" :label="`${c.real_name} (${c.username})`" :value="c.id" />
+            </el-select>
+            <div class="form-hint">可直接从联系人选择，或使用“添加成员”搜索用户</div>
+          </el-form-item>
+
+          <el-form-item v-if="newChatForm.type === 'private' || newChatForm.type === 'group'" label="添加成员">
+            <el-select v-model="newChatForm.members" multiple filterable remote reserve-keyword placeholder="搜索用户" :remote-method="searchUsers" :loading="searchingUsers" style="width:100%">
+              <el-option v-for="user in userSearchResults" :key="user.id" :label="`${user.real_name} (${user.username})`" :value="user.id">
+                <span>{{ user.real_name }}</span>
+                <span style="float: right; color: #8492a6; font-size: 13px">{{ user.username }}</span>
+              </el-option>
+            </el-select>
+          </el-form-item>
         </el-tab-pane>
 
-        <!-- 新建频道 -->
+        <!-- 新建频道 Tab（复用频道选项） -->
         <el-tab-pane label="新建频道" name="channel">
-          <el-form :model="newChatForm" label-width="100px">
-            <div v-if="userRole !== 'teacher'" class="permission-warning">
-              <el-alert
-                title="权限不足"
-                description="只有教师可以创建频道"
-                type="warning"
-                :closable="false"
-              />
-            </div>
-            <template v-else>
-              <el-form-item label="频道名称">
-                <el-input v-model="newChatForm.title" placeholder="输入频道名称" />
-              </el-form-item>
-              
-              <el-form-item label="频道描述">
-                <el-input 
-                  v-model="newChatForm.description" 
-                  type="textarea" 
-                  :rows="3"
-                  placeholder="简要描述频道用途" 
-                />
-              </el-form-item>
-            </template>
-          </el-form>
+          <el-form-item label="频道名称">
+            <el-input v-model="newChatForm.title" placeholder="输入频道名称" />
+          </el-form-item>
+
+          <el-form-item label="频道描述">
+            <el-input v-model="newChatForm.description" type="textarea" :rows="3" placeholder="简要描述频道用途" />
+          </el-form-item>
         </el-tab-pane>
+
       </el-tabs>
-      
-      <template #footer>
-        <el-button size="small" @click="showNewChatDialog = false">取消</el-button>
-        <el-button 
-          size="small"
-          type="primary" 
-          @click="handleCreateAction" 
-          :loading="creatingConversation"
-        >
-          {{ activeNewChatTab === 'contact' ? '发送请求' : '创建' }}
-        </el-button>
-      </template>
+    </el-form>
+
+    <template #footer>
+      <el-button @click="showNewChatDialog = false">取消</el-button>
+      <el-button v-if="newChatTab === 'contact'" type="primary" :loading="contactSending" @click="sendContactRequest">发送请求</el-button>
+      <el-button v-else type="primary" @click="createConversation">创建</el-button>
+    </template>
     </el-dialog>
 
     <!-- New Folder Dialog -->
@@ -472,26 +366,6 @@ const chatWindowRef = ref(null)
 const showScrollButton = ref(false)
 const pinnedMessageBar = ref(null)
 
-// 新建对话相关
-const activeNewChatTab = ref('contact')
-const contactSearchQuery = ref('')
-const contactSearchResults = ref([])
-const contactSearching = ref(false)
-const sendingRequest = ref({})
-const creatingConversation = ref(false)
-
-// 联系人与请求数据
-const contacts = ref([])
-const contactsLoading = ref(false)
-const incoming = ref([])
-const outgoing = ref([])
-const onlineMap = ref({})
-const selectedSearchUser = ref(null)
-
-const isOnline = (userId) => {
-  return !!onlineMap.value[String(userId)]
-}
-
 // Folder refs
 const activeFolderId = ref('all')
 const folders = ref([])
@@ -544,6 +418,19 @@ const newChatForm = ref({
 })
 
 const classList = ref([])
+const contactsForNewChat = ref([])
+
+// 新建对话的子标签状态（contact | group | channel）
+const newChatTab = ref('contact')
+
+// 联系人创建子表单状态
+const contactSearchQuery = ref('')
+const contactSearchResults = ref([])
+const selectedContactUser = ref(null)
+const contactAlias = ref('')
+const contactMessage = ref('')
+const contactSending = ref(false)
+let contactSearchTimer = null
 
 // 计算属性
 const canUnpin = computed(() => {
@@ -586,51 +473,12 @@ const filteredConversations = computed(() => {
   }
 })
 
-// 监听新建对话对话框关闭/打开，重置状态并在打开时加载联系人和请求
-watch(showNewChatDialog, (newVal) => {
-  if (!newVal) {
-    // 重置标签页
-    activeNewChatTab.value = 'contact'
-    // 重置联系人搜索
-    contactSearchQuery.value = ''
-    contactSearchResults.value = []
-    contactSearching.value = false
-    sendingRequest.value = {}
-    selectedSearchUser.value = null
-    // 重置表单
-    newChatForm.value = {
-      mainCategory: 'normal',
-      type: 'group',
-      title: '',
-      description: '',
-      members: [],
-      classId: null
-    }
-  } else {
-    // 打开对话框时加载联系人与请求
-    if (activeNewChatTab.value === 'contact') {
-      loadContacts()
-      loadRequests()
-    }
-  }
-})
-
 // 生命周期
-// 命名的联系人事件处理器（在模块作用域声明以便能正确 off）
-let _onContactsRequest = null
-let _onContactsAccepted = null
-
 onMounted(async () => {
   await loadConversations()
   loadFolders()
   initSocket()
   
-  // 监听联系人相关实时事件（用于更新列表）
-  _onContactsRequest = () => loadRequests()
-  _onContactsAccepted = () => loadContacts()
-  eventBus.on('contacts:request', _onContactsRequest)
-  eventBus.on('contacts:request_accepted', _onContactsAccepted)
-
   // 检查URL参数以决定是否进入讨论模式
   const queryId = route.query.id
   const queryRootId = route.query.rootId
@@ -658,6 +506,21 @@ onMounted(async () => {
   
   // 添加全局点击事件监听，关闭右键菜单
   document.addEventListener('click', handleGlobalClick)
+
+  // 监听后端通知的对话删除事件，刷新列表并处理当前打开的对话
+  eventBus.on('conversation_deleted', (data) => {
+    // 重新加载对话列表
+    loadConversations()
+
+    // 如果当前打开的对话被删除，清除 URL 与当前状态
+    const deletedId = data && data.conversation_id ? parseInt(data.conversation_id) : null
+    if (deletedId && currentConversationId.value === deletedId) {
+      router.replace({ path: '/chat', query: {} })
+      ElMessage.warning('当前对话已被删除')
+      currentConversationId.value = null
+      allMessages.value = []
+    }
+  })
 })
 
 // 监听路由变化
@@ -721,11 +584,7 @@ watch(() => route.query, async (newQuery, oldQuery) => {
     }
     
     // 标记已读
-    try {
-      markConversationRead(currentConversationId.value)
-    } catch (err) {
-      console.error('markConversationRead error:', err)
-    }
+    markConversationRead(currentConversationId.value)
   } else if (newId && currentConversationId.value) {
     // 同一个对话但模式变化了（频道<->讨论区），重新加载消息
     if (newRootId !== oldRootId) {
@@ -741,10 +600,6 @@ onUnmounted(() => {
   
   // 移除全局点击事件监听
   document.removeEventListener('click', handleGlobalClick)
-
-  // 移除联系人事件监听
-  if (_onContactsRequest) eventBus.off('contacts:request', _onContactsRequest)
-  if (_onContactsAccepted) eventBus.off('contacts:request_accepted', _onContactsAccepted)
 })
 
 // WebSocket初始化
@@ -761,6 +616,60 @@ const initSocket = () => {
   socket.on('chat:new_message', (message) => {
     handleNewMessage(message)
   })
+
+  // 联系人查找与请求（Chat 页面提供新建联系人入口）
+}
+
+// 联系人搜索（防抖）
+const onContactQueryChange = (val) => {
+  if (contactSearchTimer) clearTimeout(contactSearchTimer)
+  contactSearchTimer = setTimeout(() => {
+    searchContacts(val)
+  }, 300)
+}
+
+const searchContacts = async (query) => {
+  if (!query || query.length < 2) {
+    contactSearchResults.value = []
+    return
+  }
+  try {
+    const res = await api.get('/users/search', { params: { q: query } })
+    contactSearchResults.value = res.data || []
+  } catch (e) {
+    console.error('搜索联系人失败', e)
+  }
+}
+
+const selectContact = (u) => {
+  selectedContactUser.value = u
+  contactSearchResults.value = []
+  contactSearchQuery.value = `${u.real_name} (@${u.username})`
+}
+
+const sendContactRequest = async () => {
+  if (!selectedContactUser.value) {
+    ElMessage.warning('请选择一个用户')
+    return
+  }
+  contactSending.value = true
+  try {
+    await api.post('/contacts/requests', { target_id: selectedContactUser.value.id, message: contactMessage.value })
+    ElMessage.success('好友请求已发送')
+    // 清理表单
+    selectedContactUser.value = null
+    contactSearchQuery.value = ''
+    contactAlias.value = ''
+    contactMessage.value = ''
+    contactSearchResults.value = []
+    showNewChatDialog.value = false
+  } catch (e) {
+    console.error('发送好友请求失败', e)
+    ElMessage.error(e.response?.data?.error || '发送好友请求失败')
+  } finally {
+    contactSending.value = false
+  }
+}
   
   socket.on('chat:message_sent', (data) => {
     // 服务器确认消息已发送，更新临时消息
@@ -794,6 +703,21 @@ const initSocket = () => {
       }
     }
   })
+
+  // Contacts socket events
+  socket.on('contacts:request', (payload) => {
+    // 转发给全局 eventBus，Contacts 页面会监听并刷新
+    eventBus.emit('contacts:request', payload)
+    ElMessage.info(`收到好友请求来自 ${payload.from_name || payload.from}`)
+  })
+
+  socket.on('contacts:request_accepted', (payload) => {
+    eventBus.emit('contacts:request_accepted', payload)
+    ElMessage.success('您的好友请求已被接受')
+    if (payload.conversation_id) {
+      router.push({ path: '/chat', query: { id: payload.conversation_id } })
+    }
+  })
   
   socket.on('chat:message_deleted', (data) => {
     removeMessage(data.message_id)
@@ -820,36 +744,13 @@ const initSocket = () => {
   
   socket.on('chat:user_online', (data) => {
     updateUserOnlineStatus(data.user_id, true)
+    // 广播给其他组件（Contacts）以显示在线指示
+    try { eventBus.emit('user_online', { user_id: data.user_id, user_name: data.user_name }) } catch (e) {}
   })
   
   socket.on('chat:user_offline', (data) => {
     updateUserOnlineStatus(data.user_id, false)
-  })
-  
-  // 监听好友请求
-  socket.on('contacts:request', (data) => {
-    // 显示通知
-    ElMessage({
-      message: `${data.from_name} 向您发送了好友请求`,
-      type: 'info',
-      duration: 5000,
-      showClose: true
-    })
-    
-    // 通知Contacts页面刷新请求列表
-    eventBus.emit('contacts:request', data)
-  })
-  
-  // 监听好友请求被接受
-  socket.on('contacts:request_accepted', (data) => {
-    ElMessage({
-      message: `您的好友请求已被接受`,
-      type: 'success',
-      duration: 3000
-    })
-    
-    // 通知Contacts页面刷新
-    eventBus.emit('contacts:request_accepted', data)
+    try { eventBus.emit('user_offline', { user_id: data.user_id, user_name: data.user_name }) } catch (e) {}
   })
 }
 
@@ -969,6 +870,15 @@ const handleFilter = (type) => {
   if (currentConversationId.value) {
     loadMessages(currentConversationId.value)
     ElMessage.info(`已筛选: ${type === 'image' ? '图片' : type === 'file' ? '文件' : '链接'}`)
+  }
+}
+
+const loadContactsForNewChat = async () => {
+  try {
+    const res = await api.get('/contacts')
+    contactsForNewChat.value = res.data
+  } catch (e) {
+    console.error('加载联系人失败', e)
   }
 }
 
@@ -1251,218 +1161,65 @@ const searchUsers = async (query) => {
   }
 }
 
-// 搜索联系人
-const searchContacts = async () => {
-  const query = contactSearchQuery.value.trim()
-  if (!query || query.length < 2) {
-    contactSearchResults.value = []
-    return
-  }
-  
-  contactSearching.value = true
-  try {
-    const response = await api.get('/users/search', { params: { q: query } })
-    contactSearchResults.value = response.data.filter(user => user.id != userId) // 排除自己
-    // 清除选中项，如果搜索结果变化
-    selectedSearchUser.value = null
-  } catch (error) {
-    console.error('搜索联系人失败:', error)
-    ElMessage.error('搜索失败')
-  } finally {
-    contactSearching.value = false
-  }
-}
-
-// 选择搜索结果
-const selectSearchUser = (user) => {
-  selectedSearchUser.value = user
-}
-
-// 发送好友请求（支持传入 user 对象或 id）
-const sendFriendRequest = async (userOrId) => {
-  const id = typeof userOrId === 'object' ? userOrId.id : userOrId
-  if (!id) return
-  // 显示loading
-  sendingRequest.value[id] = true
-  try {
-    await api.post('/contacts/requests', {
-      target_id: id
-    })
-    ElMessage.success('好友请求已发送')
-    // 刷新请求列表
-    await loadRequests()
-    // 清空搜索选择
-    contactSearchQuery.value = ''
-    contactSearchResults.value = []
-    selectedSearchUser.value = null
-  } catch (error) {
-    console.error('发送好友请求失败:', error)
-    ElMessage.error(error.response?.data?.error || '发送请求失败')
-  } finally {
-    sendingRequest.value[id] = false
-  }
-}
-
-// 加载联系人
-const loadContacts = async () => {
-  contactsLoading.value = true
-  try {
-    const res = await api.get('/contacts')
-    contacts.value = res.data
-    // 更新在线映射
-    contacts.value.forEach(c => {
-      onlineMap.value[String(c.id)] = !!c.is_online
-    })
-  } catch (e) {
-    console.error('加载联系人失败', e)
-  } finally {
-    contactsLoading.value = false
-  }
-}
-
-// 加载请求
-const loadRequests = async () => {
-  try {
-    const res = await api.get('/contacts/requests')
-    incoming.value = res.data.incoming || []
-    outgoing.value = res.data.outgoing || []
-  } catch (e) {
-    console.error('加载请求失败', e)
-  }
-}
-
-// 创建私聊或跳转到已有私聊
-const startPrivateChat = async (contactId) => {
-  try {
-    const res = await api.post('/contacts/private-conversation', { target_id: contactId })
-    if (res.data.conversation_id) {
-      showNewChatDialog.value = false
-      router.push({ path: '/chat', query: { id: res.data.conversation_id } })
-    }
-  } catch (e) {
-    console.error('创建私聊失败', e)
-    ElMessage.error(e.response?.data?.error || '创建私聊失败')
-  }
-}
-
-// 接受/拒绝请求
-const acceptRequest = async (requestId) => {
-  try {
-    const res = await api.post(`/contacts/requests/${requestId}/accept`)
-    ElMessage.success('已接受')
-    await loadContacts()
-    await loadRequests()
-    if (res.data.conversation_id) {
-      showNewChatDialog.value = false
-      setTimeout(() => {
-        router.push({ path: '/chat', query: { id: res.data.conversation_id } })
-      }, 50)
-    }
-  } catch (e) {
-    console.error('接收失败', e)
-    ElMessage.error('接收失败')
-  }
-}
-
-const declineRequest = async (requestId) => {
-  try {
-    await api.post(`/contacts/requests/${requestId}/decline`)
-    ElMessage.success('已拒绝')
-    await loadRequests()
-  } catch (e) {
-    console.error('拒绝失败', e)
-    ElMessage.error('拒绝失败')
-  }
-}
-
-const confirmAcceptRequest = (requestId) => {
-  ElMessageBox.confirm('接受此好友请求吗？', '确认', { confirmButtonText: '接受', cancelButtonText: '取消', type: 'info' })
-    .then(() => acceptRequest(requestId))
-    .catch(() => {})
-}
-
-const confirmDeclineRequest = (requestId) => {
-  ElMessageBox.confirm('拒绝此好友请求吗？', '确认', { confirmButtonText: '拒绝', cancelButtonText: '取消', type: 'warning' })
-    .then(() => declineRequest(requestId))
-    .catch(() => {})
-}
-
-// 处理创建动作
-const handleCreateAction = async () => {
-  if (activeNewChatTab.value === 'contact') {
-    if (!selectedSearchUser.value) {
-      ElMessage.warning('请先选择要发送请求的用户')
-      return
-    }
-    await sendFriendRequest(selectedSearchUser.value)
-    return
-  } else if (activeNewChatTab.value === 'group' || activeNewChatTab.value === 'channel') {
-    await createConversation()
-  }
-}
-
 // 创建对话
 const createConversation = async () => {
-  creatingConversation.value = true
-  
   // 权限验证
-  if (activeNewChatTab.value === 'channel' && userRole !== 'teacher') {
+  if (newChatForm.value.mainCategory === 'channel' && userRole !== 'teacher') {
     ElMessage.error('只有教师可以创建频道')
-    creatingConversation.value = false
     return
   }
   
   if (userRole === 'student' && ['class_group', 'course_group'].includes(newChatForm.value.type)) {
     ElMessage.error('学生只能创建私聊和群聊')
-    creatingConversation.value = false
     return
   }
   
   // 验证
-  if (activeNewChatTab.value === 'channel' && !newChatForm.value.title) {
+  if (newChatForm.value.mainCategory === 'channel' && !newChatForm.value.title) {
     ElMessage.warning('请输入频道名称')
-    creatingConversation.value = false
     return
   }
   
-  if (newChatForm.value.type === 'private' && newChatForm.value.members.length !== 1) {
+  // Ensure members are in array form for consistent handling
+  let selectedMembers = newChatForm.value.members
+  if (!Array.isArray(selectedMembers)) {
+    if (selectedMembers == null || selectedMembers === '') selectedMembers = []
+    else selectedMembers = [selectedMembers]
+  }
+
+  if (newChatForm.value.type === 'private' && selectedMembers.length !== 1) {
     ElMessage.warning('私聊只能选择一个用户')
-    creatingConversation.value = false
     return
   }
   
   if (newChatForm.value.type === 'group' && !newChatForm.value.title) {
     ElMessage.warning('请输入群组名称')
-    creatingConversation.value = false
     return
   }
   
   if ((newChatForm.value.type === 'class_group' || newChatForm.value.type === 'course_group') && !newChatForm.value.classId) {
     ElMessage.warning('请选择班级')
-    creatingConversation.value = false
     return
   }
   
   // 私聊必须选择一个成员，群聊至少需要一个成员
   if (newChatForm.value.type === 'private' && newChatForm.value.members.length === 0) {
     ElMessage.warning('请选择对话对象')
-    creatingConversation.value = false
     return
   }
   
   if (newChatForm.value.type === 'group' && newChatForm.value.members.length === 0) {
     ElMessage.warning('请至少添加一个成员')
-    creatingConversation.value = false
     return
   }
   
   try {
     const requestData = {
-      type: activeNewChatTab.value === 'channel' ? 'group' : newChatForm.value.type,
+      type: newChatForm.value.mainCategory === 'channel' ? 'group' : newChatForm.value.type,
       title: newChatForm.value.title,
       description: newChatForm.value.description,
-      member_ids: newChatForm.value.members,
-      group_subtype: activeNewChatTab.value === 'channel' ? 'channel' : 'normal',
+      member_ids: selectedMembers,
+      group_subtype: newChatForm.value.mainCategory === 'channel' ? 'channel' : 'normal',
       conversation_subtype: newChatForm.value.type  // 保存子类型标签
     }
     
@@ -1473,7 +1230,7 @@ const createConversation = async () => {
     
     const response = await api.post('/chat/conversations', requestData)
     
-    ElMessage.success(activeNewChatTab.value === 'channel' ? '频道创建成功' : '对话创建成功')
+    ElMessage.success(newChatForm.value.mainCategory === 'channel' ? '频道创建成功' : '对话创建成功')
     showNewChatDialog.value = false
     
     // 重置表单
@@ -1494,8 +1251,6 @@ const createConversation = async () => {
   } catch (error) {
     console.error('创建对话失败:', error)
     ElMessage.error(error.response?.data?.error || '创建对话失败')
-  } finally {
-    creatingConversation.value = false
   }
 }
 
@@ -2695,118 +2450,4 @@ const updateUserOnlineStatus = (userId, isOnline) => {
   color: #409eff;
   font-size: 11px;
 }
-
-/* 新建对话样式 */
-.contact-creation {
-  max-height: 400px;
-  overflow-y: auto;
-}
-
-.contact-creation .el-input {
-  margin-bottom: 16px;
-}
-
-.search-results {
-  max-height: 300px;
-  overflow-y: auto;
-}
-
-.search-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
-  border-bottom: 1px solid #f0f0f0;
-  transition: background-color 0.2s;
-}
-
-.search-item:hover {
-  background-color: #f5f7fa;
-}
-
-.search-item:last-child {
-  border-bottom: none;
-}
-
-.search-item.selected {
-  background: #e6f7ff;
-  border-left: 3px solid #409eff;
-}
-
-.user-info {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.user-details {
-  flex: 1;
-}
-
-.user-details .name {
-  font-weight: 500;
-  color: #303133;
-  margin-bottom: 2px;
-}
-
-.user-details .meta {
-  font-size: 12px;
-  color: #909399;
-}
-
-.searching, .no-results {
-  text-align: center;
-  color: #909399;
-  padding: 20px;
-}
-
-.permission-warning {
-  margin-bottom: 16px;
-}
-
-/* Contacts tab columns: make two columns equal width */
-.contacts-requests { display:flex; gap:12px; margin-top: 16px }
-.contacts-column, .requests-column { flex: 1 1 50%; min-width: 0 }
-.requests-column { max-width: none }
-
-/* Unified card sizes and spacing */
-.contact-card, .request-card, .request-item {
-  cursor: pointer;
-  margin-bottom: 8px;
-  min-height: 86px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between; /* keep actions at bottom */
-  align-items: stretch;
-  padding: 12px;
-  box-sizing: border-box;
-  border-radius: 6px;
-}
-.contact-card:hover { background: #f7fbff }
-.request-card { width: 100% }
-
-/* 请求卡片布局（统一） */
-.request-card-inner, .request-item {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  width: 100%;
-}
-.request-info { flex: 1; overflow: hidden; text-align: left }
-.request-actions { display: flex; gap: 8px; align-items: center; justify-content: flex-start; margin-top: 10px }
-.request-card .msg, .contact-card .meta, .request-item .msg { color: #909399; margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left }
-
-/* Contact card content and actions */
-.contact-card-content { display:flex; align-items:center; gap:12px; text-align: left }
-.contact-card-actions { margin-top: 10px; display:flex; justify-content:flex-start; }
-
-/* Ensure el-col/rows stretch so cards have uniform vertical height when in same row */
-.contacts-column .el-row .el-col { display: flex }
-.contacts-column .el-col .el-card, .requests-column .el-col .el-card { display: flex; flex-direction: column; justify-content: space-between; width: 100% }
-
-/* 为请求列添加容器样式 */
-.requests-column .el-card, .contacts-column .el-card, .request-item { padding: 0 }
-.requests-column { max-height: 380px; overflow-y: auto }
-.contacts-column { max-height: 380px; overflow-y: auto }
-
 </style>

@@ -59,6 +59,7 @@ export function useLiveClass(options = {}) {
   // 屏幕共享
   const isScreenSharing = ref(false)
   const screenShareStream = ref(null)
+  const screenSharePeerConnection = ref(null)
   
   // 对话ID
   const discussionConversationId = ref(null)
@@ -114,6 +115,11 @@ export function useLiveClass(options = {}) {
       classroomStatus.value = 'in_progress'
       discussionConversationId.value = data.conversation_id
       classGroupConversationId.value = data.class_group_conversation_id
+      console.log('useLiveClass: Set conversation IDs', {
+        discussion: data.conversation_id,
+        classGroup: data.class_group_conversation_id,
+        data: data
+      })
       
       // 设置开始时间
       if (data.start_time) {
@@ -170,8 +176,8 @@ export function useLiveClass(options = {}) {
       connected.value = true
       reconnecting.value = false
       
-      // 加入课堂房间
-      socket.value.emit('classroom:join', {
+      // 加入课堂房间（与后端事件名保持一致）
+      socket.value.emit('join_class', {
         lesson_id: lessonId.value,
         user_id: userId.value,
         user_name: userName.value,
@@ -216,6 +222,30 @@ export function useLiveClass(options = {}) {
         participants.value.push({ ...participant, online: true })
       }
     })
+
+    // 兼容后端现有广播事件名（user_joined / user_left）
+    socket.value.on('user_joined', (data) => {
+      const participant = {
+        id: data.user_id,
+        name: data.user_name,
+        role: data.role || 'student',
+        joined_at: data.timestamp,
+        online: true
+      }
+      const idx = participants.value.findIndex(p => p.id === participant.id)
+      if (idx > -1) {
+        participants.value[idx] = { ...participants.value[idx], ...participant }
+      } else {
+        participants.value.push(participant)
+      }
+    })
+
+    socket.value.on('user_left', (data) => {
+      const index = participants.value.findIndex(p => p.id === data.user_id)
+      if (index > -1) {
+        participants.value[index].online = false
+      }
+    })
     
     socket.value.on('classroom:participant_left', (data) => {
       const index = participants.value.findIndex(p => p.id === data.user_id)
@@ -242,19 +272,42 @@ export function useLiveClass(options = {}) {
     })
     
     // 举手事件
-    socket.value.on('classroom:hand_raised', (data) => {
+    socket.value.on('participant_raised_hand', (data) => {
       const index = participants.value.findIndex(p => p.id === data.user_id)
       if (index > -1) {
         participants.value[index].hand_raised = true
-        participants.value[index].hand_raised_at = data.time
+        participants.value[index].hand_raised_at = data.timestamp
       }
     })
     
-    socket.value.on('classroom:hand_lowered', (data) => {
+    socket.value.on('participant_lowered_hand', (data) => {
       const index = participants.value.findIndex(p => p.id === data.user_id)
       if (index > -1) {
         participants.value[index].hand_raised = false
       }
+    })
+    
+    socket.value.on('participant_speak_allowed', (data) => {
+      const index = participants.value.findIndex(p => p.id === data.user_id)
+      if (index > -1) {
+        participants.value[index].can_speak = data.can_speak
+        participants.value[index].hand_raised = false
+      }
+    })
+    
+    // 测验事件
+    socket.value.on('quiz_started', (data) => {
+      console.log('Quiz started:', data)
+      // 可以在这里添加测验状态
+    })
+    
+    // 其他课堂事件
+    socket.value.on('attendance_started', (data) => {
+      console.log('Attendance started:', data)
+    })
+    
+    socket.value.on('task_published', (data) => {
+      console.log('Task published:', data)
     })
     
     // 屏幕共享事件
@@ -264,13 +317,79 @@ export function useLiveClass(options = {}) {
     
     socket.value.on('classroom:screen_share_stopped', () => {
       isScreenSharing.value = false
+      if (screenSharePeerConnection.value) {
+        screenSharePeerConnection.value.close()
+        screenSharePeerConnection.value = null
+      }
+      screenShareStream.value = null
+    })
+    
+    // WebRTC事件处理（用于屏幕共享）
+    socket.value.on('webrtc_offer', async (data) => {
+      if (!isStudent.value) return
+      
+      try {
+        const peerConnection = new RTCPeerConnection({
+          iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' }
+          ]
+        })
+        
+        screenSharePeerConnection.value = peerConnection
+        
+        peerConnection.onicecandidate = (event) => {
+          if (event.candidate) {
+            socket.value?.emit('webrtc_ice_candidate', {
+              lesson_id: lessonId.value,
+              candidate: event.candidate
+            })
+          }
+        }
+        
+        peerConnection.ontrack = (event) => {
+          screenShareStream.value = event.streams[0]
+        }
+        
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer))
+        const answer = await peerConnection.createAnswer()
+        await peerConnection.setLocalDescription(answer)
+        
+        socket.value?.emit('webrtc_answer', {
+          lesson_id: lessonId.value,
+          answer: answer
+        })
+      } catch (err) {
+        console.error('Failed to handle WebRTC offer:', err)
+      }
+    })
+    
+    socket.value.on('webrtc_answer', async (data) => {
+      if (!isTeacher.value || !screenSharePeerConnection.value) return
+      
+      try {
+        await screenSharePeerConnection.value.setRemoteDescription(new RTCSessionDescription(data.answer))
+      } catch (err) {
+        console.error('Failed to handle WebRTC answer:', err)
+      }
+    })
+    
+    socket.value.on('webrtc_ice_candidate', async (data) => {
+      if (!screenSharePeerConnection.value) return
+      
+      try {
+        await screenSharePeerConnection.value.addIceCandidate(new RTCIceCandidate(data.candidate))
+      } catch (err) {
+        console.error('Failed to add ICE candidate:', err)
+      }
     })
   }
   
   // 断开Socket
   const disconnectSocket = () => {
     if (socket.value) {
-      socket.value.emit('classroom:leave', {
+      // 与后端事件名保持一致
+      socket.value.emit('leave_class', {
         lesson_id: lessonId.value,
         user_id: userId.value
       })
@@ -375,13 +494,45 @@ export function useLiveClass(options = {}) {
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: true,
-        audio: true
+        audio: false
       })
       
       screenShareStream.value = stream
       isScreenSharing.value = true
       
-      // 通知其他参与者
+      // 创建WebRTC连接用于屏幕共享
+      const peerConnection = new RTCPeerConnection({
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' }
+        ]
+      })
+      
+      // 添加屏幕流到连接
+      stream.getTracks().forEach(track => {
+        peerConnection.addTrack(track, stream)
+      })
+      
+      // 处理ICE候选
+      peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+          socket.value?.emit('webrtc_ice_candidate', {
+            lesson_id: lessonId.value,
+            candidate: event.candidate
+          })
+        }
+      }
+      
+      // 创建offer并发送
+      const offer = await peerConnection.createOffer()
+      await peerConnection.setLocalDescription(offer)
+      
+      socket.value?.emit('webrtc_offer', {
+        lesson_id: lessonId.value,
+        offer: offer
+      })
+      
+      // 通知其他参与者屏幕共享已开始
       socket.value?.emit('classroom:screen_share_start', {
         lesson_id: lessonId.value
       })
@@ -390,6 +541,9 @@ export function useLiveClass(options = {}) {
       stream.getVideoTracks()[0].onended = () => {
         stopScreenShare()
       }
+      
+      // 存储peerConnection以便后续清理
+      screenSharePeerConnection.value = peerConnection
       
       return stream
     } catch (err) {
@@ -403,6 +557,10 @@ export function useLiveClass(options = {}) {
     if (screenShareStream.value) {
       screenShareStream.value.getTracks().forEach(track => track.stop())
       screenShareStream.value = null
+    }
+    if (screenSharePeerConnection.value) {
+      screenSharePeerConnection.value.close()
+      screenSharePeerConnection.value = null
     }
     isScreenSharing.value = false
     
@@ -491,6 +649,7 @@ export function useLiveClass(options = {}) {
     whiteboardReadonly,
     isScreenSharing,
     screenShareStream,
+    screenSharePeerConnection,
     discussionConversationId,
     classGroupConversationId,
     

@@ -96,14 +96,33 @@ export default {
     togglePanel() {
       this.isExpanded = !this.isExpanded
     },
-    joinLiveClass(live) {
-      // Navigate to live classroom
-      this.$router.push({
-        name: 'LiveClassroom',
-        params: { 
-          liveId: live.live_id
+    async joinLiveClass(live) {
+      // 使用 lesson_id 检查课堂状态后再导航，按角色区分教师/学生路由
+      const lessonId = live.lesson_id
+      try {
+        const response = await api.get(`/live-class/${lessonId}/check`)
+        if (response.data.status === 'ended') {
+          this.$message.warning('课堂已结束，无法进入')
+          // 刷新列表，移除已结束的课堂
+          this.fetchLiveStatus()
+          return
         }
-      })
+      } catch (error) {
+        if (error.response?.status === 403) {
+          this.$message.error(error.response.data.error || '课堂已结束')
+          this.fetchLiveStatus()
+          return
+        }
+        console.error('检查课堂状态失败:', error)
+        // 继续尝试导航
+      }
+
+      const role = sessionStorage.getItem('user_role')
+      if (role === 'teacher') {
+        this.$router.push(`/teacher/live-class/${lessonId}`)
+      } else {
+        this.$router.push(`/live-class/${lessonId}`)
+      }
     },
     formatDuration(startTime) {
       if (!startTime) return '刚刚开始'

@@ -280,7 +280,8 @@ export default {
   height: 100vh;
   background: #fff;
   box-shadow: -4px 0 20px rgba(0, 0, 0, 0.1);
-  z-index: 200;
+  /* 提升层级，高于顶部工具栏（z-index:1000） */
+  z-index: 1100;
   display: flex;
   flex-direction: column;
 }
@@ -289,7 +290,8 @@ export default {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.3);
-  z-index: 199;
+  /* 遮罩也需要高于工具栏，但低于面板 */
+  z-index: 1099;
 }
 
 /* 头部 */

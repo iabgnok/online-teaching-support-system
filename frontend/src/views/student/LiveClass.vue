@@ -147,6 +147,17 @@ export default {
           this.$refs.discussionPanel.receiveMessage(data)
         }
       })
+
+      // 当服务器删除了与课堂相关的对话时，通知全局聊天界面刷新
+      this.socket.on('chat:conversation_deleted', (data) => {
+        console.log('Received conversation deleted:', data)
+        try {
+          const eventBus = require('../../utils/eventBus').eventBus
+          eventBus.emit('conversation_deleted', data)
+        } catch (e) {
+          console.warn('eventBus unavailable', e)
+        }
+      })
       
       this.socket.on('disconnect', () => {
         console.log('Socket disconnected')

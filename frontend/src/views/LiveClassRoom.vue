@@ -32,6 +32,23 @@
         @exit="handleExit"
       />
       
+      <!-- 课堂工具栏 -->
+      <ClassroomToolbar
+        :lesson-info="lessonInfo"
+        :classroom-status="classroomStatus"
+        :participant-count="onlineCount"
+        :show-participants="showParticipants"
+        :is-teacher="isTeacher"
+        :is-student="isStudent"
+        @toggle-participants="showParticipants = !showParticipants"
+        @start-attendance="handleStartAttendance"
+        @publish-task="handlePublishTask"
+        @start-quiz="handleStartQuiz"
+        @raise-hand="handleRaiseHand"
+        @share-board="handleShareBoard"
+        @exit="handleExit"
+      />
+      
       <!-- 主要内容区域 -->
       <div class="main-content">
         <!-- 左侧：画板区域 -->
@@ -96,6 +113,7 @@ import { ref, watch, provide } from 'vue'
 import { useLiveClass } from '../composables/useLiveClass'
 import WhiteBoard from '../components/live-class/WhiteBoard.vue'
 import LiveClassToolbar from '../components/live-class/LiveClassToolbar.vue'
+import ClassroomToolbar from '../components/live-class/ClassroomToolbar.vue'
 import LiveClassChat from '../components/live-class/LiveClassChat.vue'
 import ParticipantsPanel from '../components/live-class/ParticipantsPanel.vue'
 
@@ -104,6 +122,7 @@ export default {
   components: {
     WhiteBoard,
     LiveClassToolbar,
+    ClassroomToolbar,
     LiveClassChat,
     ParticipantsPanel
   },
@@ -397,8 +416,7 @@ export default {
 /* 主内容 */
 .main-content {
   flex: 1;
-  display: flex;
-  min-height: 0;
+  display: flex;  position: relative;  min-height: 0;
   padding: 12px;
   gap: 12px;
 }

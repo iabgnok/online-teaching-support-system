@@ -315,6 +315,8 @@ export default {
   },
   emits: ['board-updated'],
   setup(props, { emit }) {
+    // 存储正在接收的分段 stroke 的最后一点
+    const strokeLastPointMap = {}
     // ========== Refs ==========
     const mainCanvas = ref(null)
     const tempCanvas = ref(null)
@@ -344,6 +346,13 @@ export default {
     const history = ref([])
     const historyIndex = ref(-1)
     const maxHistory = 50
+
+    // 画笔缓冲与批量发送设置：用于减少丢帧时的断裂（快速绘制时聚合点并插值）
+    const strokeBuffer = ref([])
+    const currentStrokeId = ref(null)
+    let strokeFlushTimer = null
+    const STROKE_FLUSH_INTERVAL = 40 // ms
+    const STROKE_MAX_POINTS = 6
     
     // 颜色面板
     const colorPalette = [
@@ -437,13 +446,13 @@ export default {
     
     const handleMouseDown = (e) => {
       if (props.readonly) return
-      
+
       const point = getEventPoint(e)
       startPoint.x = point.x
       startPoint.y = point.y
       lastPoint.x = point.x
       lastPoint.y = point.y
-      
+
       if (currentTool.value === 'text') {
         textPosition.x = point.x
         textPosition.y = point.y
@@ -451,9 +460,15 @@ export default {
         nextTick(() => textInput.value?.focus())
         return
       }
-      
+
       isDrawing.value = true
-      
+
+      // 初始化当前 stroke
+      strokeBuffer.value = []
+      currentStrokeId.value = `${Date.now()}-${Math.random().toString(36).slice(2,7)}`
+      // 添加起始点
+      addPointToStroke(point)
+
       // 自由绘制工具立即开始绘制
       if (['pen', 'highlighter', 'eraser'].includes(currentTool.value)) {
         beginPath(point)
@@ -462,41 +477,37 @@ export default {
     
     const handleMouseMove = (e) => {
       if (!isDrawing.value || props.readonly) return
-      
+
       const point = getEventPoint(e)
-      
+
       if (['pen', 'highlighter', 'eraser'].includes(currentTool.value)) {
-        // 自由绘制
+        // 自由绘制（本地即时渲染）
         drawLine(lastPoint, point)
+
+        // 缓存并批量发送到服务器，提高快速绘制时的连贯性
+        addPointToStroke(point)
+
         lastPoint.x = point.x
         lastPoint.y = point.y
-        
-        // 发送到服务器
-        emitDrawing({
-          type: 'draw',
-          tool: currentTool.value,
-          from: { ...lastPoint },
-          to: point,
-          color: currentColor.value,
-          size: brushSize.value
-        })
       } else {
         // 形状预览
         drawShapePreview(point)
+        // 发送 shape preview 到学生端（节流）
+        emitShapePreview(startPoint, point)
       }
     }
     
     const handleMouseUp = (e) => {
       if (!isDrawing.value || props.readonly) return
-      
+
       const point = getEventPoint(e)
-      
+
       // 形状工具完成绘制
       if (['line', 'arrow', 'rect', 'circle'].includes(currentTool.value)) {
         drawShape(startPoint, point)
         clearTempCanvas()
-        
-        // 发送形状到服务器
+
+        // 发送形状到服务器（最终形状）
         emitDrawing({
           type: 'shape',
           tool: currentTool.value,
@@ -505,9 +516,14 @@ export default {
           color: currentColor.value,
           size: brushSize.value
         })
+
+        // 额外发送 shape_complete 以便学生能将形状固定到主画布
+        emitShapeComplete(startPoint, point)
       }
-      
+
+      // 结束当前 stroke（确保最后的点被发送）
       isDrawing.value = false
+      flushStroke(true)
       saveHistory()
     }
     
@@ -632,7 +648,160 @@ export default {
     const clearTempCanvas = () => {
       tempCtx.clearRect(0, 0, tempCanvas.value.width, tempCanvas.value.height)
     }
-    
+
+    // ========== Stroke buffering & smoothing helpers ==========
+    const addPointToStroke = (point) => {
+      if (!mainCanvas.value) return
+      const w = mainCanvas.value.width
+      const h = mainCanvas.value.height
+      strokeBuffer.value.push({ x_percent: point.x / w, y_percent: point.y / h, t: Date.now() })
+
+      // 如果缓冲已满立刻发送
+      if (strokeBuffer.value.length >= STROKE_MAX_POINTS) {
+        flushStroke(false)
+        return
+      }
+
+      // 定时发送（合并小段）
+      if (!strokeFlushTimer) {
+        strokeFlushTimer = setTimeout(() => {
+          flushStroke(false)
+        }, STROKE_FLUSH_INTERVAL)
+      }
+    }
+
+    const flushStroke = (isEnd = false) => {
+      if (!props.socket || strokeBuffer.value.length === 0) return
+
+      const payload = {
+        lesson_id: props.lessonId,
+        stroke_id: currentStrokeId.value,
+        tool: currentTool.value,
+        color: currentColor.value,
+        size: brushSize.value,
+        points: strokeBuffer.value.slice(),
+        isEnd: !!isEnd,
+        created_at: Date.now()
+      }
+
+      props.socket.emit('classroom:board_stroke', payload)
+
+      strokeBuffer.value = []
+      if (strokeFlushTimer) { clearTimeout(strokeFlushTimer); strokeFlushTimer = null }
+      if (isEnd) { currentStrokeId.value = null }
+    }
+
+    const drawStrokePoints = (points, tool, color, size, strokeId) => {
+      if (!ctx || !mainCanvas.value || !points || points.length === 0) return
+      const w = mainCanvas.value.width
+      const h = mainCanvas.value.height
+
+      // 将百分比转换为像素并密化（插值）以填补大间隔
+      const pts = []
+      for (let i = 0; i < points.length; i++) {
+        const p = points[i]
+        const x = (p.x_percent !== undefined) ? p.x_percent * w : (p.x || 0)
+        const y = (p.y_percent !== undefined) ? p.y_percent * h : (p.y || 0)
+        pts.push({ x, y })
+      }
+
+      // 如果有之前的末点（相同 strokeId），在首点前追加，以连接分段
+      if (strokeId && strokeLastPointMap[strokeId]) {
+        const prev = strokeLastPointMap[strokeId]
+        const first = pts[0]
+        const dx = first.x - prev.x
+        const dy = first.y - prev.y
+        const dist = Math.hypot(dx, dy)
+        if (dist > 0.5) {
+          // 插入 prev 到首点的中间点来避免断裂
+          pts.unshift(prev)
+        }
+      }
+
+      // 插值：如果相邻点距离过大，插入线性中间点
+      const densified = []
+      for (let i = 0; i < pts.length - 1; i++) {
+        const a = pts[i]
+        const b = pts[i + 1]
+        densified.push(a)
+        const dx = b.x - a.x
+        const dy = b.y - a.y
+        const dist = Math.hypot(dx, dy)
+        const step = Math.max(0, Math.floor(dist / Math.max(2, size * 2)))
+        for (let s = 1; s < step; s++) {
+          const t = s / step
+          densified.push({ x: a.x + dx * t, y: a.y + dy * t })
+        }
+      }
+      densified.push(pts[pts.length - 1])
+
+      // 绘制平滑曲线
+      ctx.save()
+      ctx.strokeStyle = color
+      ctx.lineWidth = size
+      ctx.lineCap = 'round'
+      ctx.lineJoin = 'round'
+      ctx.globalCompositeOperation = (tool === 'eraser') ? 'destination-out' : 'source-over'
+      if (tool === 'highlighter') ctx.globalAlpha = 0.3
+
+      if (densified.length === 1) {
+        const p = densified[0]
+        ctx.beginPath()
+        ctx.arc(p.x, p.y, Math.max(1, size / 2), 0, Math.PI * 2)
+        ctx.fillStyle = color
+        if (tool === 'eraser') { ctx.globalCompositeOperation = 'destination-out'; ctx.fill(); ctx.globalCompositeOperation = 'source-over' } else { ctx.fill() }
+      } else {
+        ctx.beginPath()
+        ctx.moveTo(densified[0].x, densified[0].y)
+        for (let i = 1; i < densified.length; i++) {
+          const prev = densified[i - 1]
+          const cur = densified[i]
+          const cx = (prev.x + cur.x) / 2
+          const cy = (prev.y + cur.y) / 2
+          ctx.quadraticCurveTo(prev.x, prev.y, cx, cy)
+        }
+        // 到最后一点
+        const last = densified[densified.length - 1]
+        ctx.lineTo(last.x, last.y)
+        ctx.stroke()
+
+        // 在端点填充圆点以避免断点
+        const radius = Math.max(1, size / 2)
+        ctx.beginPath()
+        ctx.arc(last.x, last.y, radius, 0, Math.PI * 2)
+        ctx.fillStyle = color
+        if (tool === 'eraser') { ctx.globalCompositeOperation = 'destination-out'; ctx.fill(); ctx.globalCompositeOperation = 'source-over' } else { ctx.fill() }
+      }
+
+      ctx.restore()
+
+      // 更新 stroke 最后点（用于连接下一段）
+      if (strokeId) {
+        strokeLastPointMap[strokeId] = pts[pts.length - 1]
+        if (points.length && points[points.length - 1].isEnd) {
+          delete strokeLastPointMap[strokeId]
+        }
+      }
+    }
+
+    const receiveStroke = (data) => {
+      if (!data || !data.points) return
+
+      // 忽略在清空之前发生的 stroke（基于点时间戳）
+      const maxT = Math.max(...data.points.map(p => p.t || 0))
+      if (lastClearTimestamp.value && maxT <= lastClearTimestamp.value) {
+        return
+      }
+
+      drawStrokePoints(data.points, data.tool || 'pen', data.color || '#000', data.size || 3, data.stroke_id)
+
+      // 如果此段为结束，则记录历史以便撤销/重做
+      if (data.isEnd) saveHistory()
+
+      // 如果 stroke 带有 isEnd 并且清除了之前临时预览，我们应该确保临时画布清空
+      if (data.isEnd) clearTempCanvas()
+    }
+
     const finishTextInput = () => {
       if (!textContent.value.trim()) {
         cancelTextInput()
@@ -709,11 +878,21 @@ export default {
     
     const clearCanvas = () => {
       if (!ctx || !mainCanvas.value) return
-      
+
+      // 先取消并清空正在缓冲的 stroke，防止清空后缓冲数据被发送回来
+      strokeBuffer.value = []
+      if (strokeFlushTimer) { clearTimeout(strokeFlushTimer); strokeFlushTimer = null }
+      currentStrokeId.value = null
+
+      // 清空主画布与临时画布
       ctx.clearRect(0, 0, mainCanvas.value.width, mainCanvas.value.height)
+      clearTempCanvas()
       saveHistory()
-      
-      emitDrawing({ type: 'clear' })
+
+      // 广播清空事件
+      if (props.socket) {
+        props.socket.emit('classroom:board_clear', { lesson_id: props.lessonId, cleared_at: Date.now() })
+      }
     }
     
     // 图片
@@ -759,6 +938,95 @@ export default {
     const onBackgroundLoad = () => {
       resizeCanvas()
     }
+
+    // 记录最近一次被清空的时间戳，用于忽略清空前的延迟数据
+    const lastClearTimestamp = ref(0)
+
+    // ========== Shape preview (remote & local emission) ==========
+    const shapePreviewThrottleTimer = { timer: null }
+    const SHAPE_PREVIEW_INTERVAL = 50 // ms
+
+    const emitShapePreview = (from, to) => {
+      if (!props.socket || !mainCanvas.value) return
+      const w = mainCanvas.value.width
+      const h = mainCanvas.value.height
+      const payload = {
+        lesson_id: props.lessonId,
+        tool: currentTool.value,
+        color: currentColor.value,
+        size: brushSize.value,
+        from_percent: { x: from.x / w, y: from.y / h },
+        to_percent: { x: to.x / w, y: to.y / h }
+      }
+      // throttle
+      if (shapePreviewThrottleTimer.timer) return
+      shapePreviewThrottleTimer.timer = setTimeout(() => { shapePreviewThrottleTimer.timer = null }, SHAPE_PREVIEW_INTERVAL)
+      props.socket.emit('classroom:shape_preview', payload)
+    }
+
+    const emitShapeComplete = (from, to) => {
+      if (!props.socket || !mainCanvas.value) return
+      const w = mainCanvas.value.width
+      const h = mainCanvas.value.height
+      const payload = {
+        lesson_id: props.lessonId,
+        tool: currentTool.value,
+        color: currentColor.value,
+        size: brushSize.value,
+        from_percent: { x: from.x / w, y: from.y / h },
+        to_percent: { x: to.x / w, y: to.y / h }
+      }
+      props.socket.emit('classroom:shape_complete', payload)
+    }
+
+    // Draw preview on temp canvas for remote shapes
+    const renderRemoteShapePreview = (from, to, tool, color, size) => {
+      if (!tempCtx || !tempCanvas.value) return
+      clearTempCanvas()
+      tempCtx.strokeStyle = color || '#000'
+      tempCtx.lineWidth = size || 3
+      tempCtx.lineCap = 'round'
+      tempCtx.lineJoin = 'round'
+      tempCtx.globalCompositeOperation = (tool === 'eraser') ? 'destination-out' : 'source-over'
+
+      // draw same shapes as local preview
+      tempCtx.beginPath()
+      switch ((tool || 'line')) {
+        case 'line':
+          tempCtx.moveTo(from.x, from.y)
+          tempCtx.lineTo(to.x, to.y)
+          tempCtx.stroke()
+          break
+        case 'arrow':
+          drawArrow(tempCtx, from, to)
+          tempCtx.stroke()
+          break
+        case 'rect':
+          tempCtx.rect(from.x, from.y, to.x - from.x, to.y - from.y)
+          tempCtx.stroke()
+          break
+        case 'circle':
+          const rx = Math.abs(to.x - from.x) / 2
+          const ry = Math.abs(to.y - from.y) / 2
+          const cx = from.x + (to.x - from.x) / 2
+          const cy = from.y + (to.y - from.y) / 2
+          tempCtx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2)
+          tempCtx.stroke()
+          break
+      }
+    }
+
+    const handleRemoteShapeComplete = (from, to, tool, color, size) => {
+      // Draw final shape on main canvas
+      if (!ctx) return
+      ctx.save()
+      ctx.strokeStyle = color || '#000'
+      ctx.lineWidth = size || 3
+      ctx.globalCompositeOperation = (tool === 'eraser') ? 'destination-out' : 'source-over'
+      drawShape(from, to)
+      ctx.restore()
+      clearTempCanvas()
+    }
     
     // 下载
     const downloadCanvas = () => {
@@ -783,23 +1051,74 @@ export default {
     
     // Socket通信
     const emitDrawing = (data) => {
-      if (!props.socket) return
-      
-      props.socket.emit('classroom:board_draw', {
+      if (!props.socket || !mainCanvas.value) return
+
+      // 拓展为发送相对（百分比）坐标，便于不同尺寸浏览器同步
+      const payload = {
         lesson_id: props.lessonId,
         ...data
-      })
-      
+      }
+
+      if (data.from) {
+        payload.from_percent = {
+          x: data.from.x / mainCanvas.value.width,
+          y: data.from.y / mainCanvas.value.height
+        }
+      }
+      if (data.to) {
+        payload.to_percent = {
+          x: data.to.x / mainCanvas.value.width,
+          y: data.to.y / mainCanvas.value.height
+        }
+      }
+
+      // 文本位置也使用百分比
+      if (data.position) {
+        payload.position_percent = {
+          x: data.position.x / mainCanvas.value.width,
+          y: data.position.y / mainCanvas.value.height
+        }
+      }
+
+      // 图片使用百分比表示位置与尺寸
+      if (data.x !== undefined && data.y !== undefined && data.width !== undefined && data.height !== undefined) {
+        payload.x_percent = data.x / mainCanvas.value.width
+        payload.y_percent = data.y / mainCanvas.value.height
+        payload.width_percent = data.width / mainCanvas.value.width
+        payload.height_percent = data.height / mainCanvas.value.height
+      }
+
+      props.socket.emit('classroom:board_draw', payload)
+
       emit('board-updated', data)
     }
     
     const receiveDrawing = (data) => {
-      if (!ctx) return
-      
+      if (!ctx || !mainCanvas.value) return
+
+      // helper: convert percent coords (来自不同尺寸画布) 为当前画布像素坐标
+      const mainW = mainCanvas.value.width
+      const mainH = mainCanvas.value.height
+
+      const from = data.from_percent ? {
+        x: data.from_percent.x * mainW,
+        y: data.from_percent.y * mainH
+      } : data.from
+
+      const to = data.to_percent ? {
+        x: data.to_percent.x * mainW,
+        y: data.to_percent.y * mainH
+      } : data.to
+
+      // 确保圆角、平滑连接
+      ctx.lineCap = 'round'
+      ctx.lineJoin = 'round'
+
       switch (data.type) {
         case 'draw':
           ctx.strokeStyle = data.color
           ctx.lineWidth = data.size
+
           if (data.tool === 'eraser') {
             ctx.globalCompositeOperation = 'destination-out'
             ctx.lineWidth = data.size * 3
@@ -810,31 +1129,72 @@ export default {
             ctx.globalCompositeOperation = 'source-over'
             ctx.globalAlpha = 1
           }
-          ctx.beginPath()
-          ctx.moveTo(data.from.x, data.from.y)
-          ctx.lineTo(data.to.x, data.to.y)
-          ctx.stroke()
+
+          if (from && to) {
+            // 使用二次曲线平滑线段，减少离散点的断裂感
+            ctx.beginPath()
+            ctx.moveTo(from.x, from.y)
+            const cx = (from.x + to.x) / 2
+            const cy = (from.y + to.y) / 2
+            ctx.quadraticCurveTo(cx, cy, to.x, to.y)
+            ctx.stroke()
+
+            // 在端点填充圆点以覆盖间隙
+            const radius = Math.max(1, data.size / 2)
+            ctx.beginPath()
+            ctx.arc(to.x, to.y, radius, 0, Math.PI * 2)
+            ctx.fillStyle = data.color
+            if (data.tool === 'eraser') {
+              // 用擦除模式清除圆点
+              ctx.globalCompositeOperation = 'destination-out'
+              ctx.fill()
+              ctx.globalCompositeOperation = 'source-over'
+            } else {
+              ctx.fill()
+            }
+          }
+
           ctx.globalAlpha = 1
           break
-          
+
         case 'shape':
-          drawShape(data.from, data.to)
+          if (from && to) drawShape(from, to)
           break
-          
+
         case 'text':
-          ctx.font = `${data.size}px Arial`
-          ctx.fillStyle = data.color
-          ctx.fillText(data.content, data.position.x, data.position.y + data.size)
+          const pos = data.position && data.position.x !== undefined && data.position.y !== undefined
+            ? (data.position_percent ? { x: data.position_percent.x * mainW, y: data.position_percent.y * mainH } : data.position)
+            : null
+          if (pos) {
+            ctx.font = `${data.size}px Arial`
+            ctx.fillStyle = data.color
+            ctx.fillText(data.content, pos.x, pos.y + data.size)
+          }
           break
-          
+
         case 'clear':
+          // 兼容旧的 clear 事件
+          const clearedAt = Date.now()
+          lastClearTimestamp.value = clearedAt
           ctx.clearRect(0, 0, mainCanvas.value.width, mainCanvas.value.height)
+          clearTempCanvas()
+          strokeBuffer.value = []
+          if (strokeFlushTimer) { clearTimeout(strokeFlushTimer); strokeFlushTimer = null }
+          currentStrokeId.value = null
+          for (const k of Object.keys(strokeLastPointMap)) delete strokeLastPointMap[k]
+          // 记录空白状态
+          saveHistory()
           break
-          
+
         case 'image':
           const img = new Image()
           img.onload = () => {
-            ctx.drawImage(img, data.x, data.y, data.width, data.height)
+            // 支持百分比坐标
+            const x = data.x_percent !== undefined ? data.x_percent * mainW : data.x
+            const y = data.y_percent !== undefined ? data.y_percent * mainH : data.y
+            const width = data.width_percent !== undefined ? data.width_percent * mainW : data.width
+            const height = data.height_percent !== undefined ? data.height_percent * mainH : data.height
+            ctx.drawImage(img, x, y, width, height)
           }
           img.src = data.data
           break
@@ -879,36 +1239,145 @@ export default {
     onMounted(() => {
       initCanvas()
       window.addEventListener('keydown', handleKeyDown)
-      
+
       // 监听Socket事件
       if (props.socket) {
         props.socket.on('classroom:board_draw', receiveDrawing)
         props.socket.on('classroom:board_image', (data) => {
           setBackgroundImage(data.imageUrl)
         })
+
+        // 新的批量 stroke 协议
+        props.socket.on('classroom:board_stroke', receiveStroke)
+
+        // board clear
+        props.socket.on('classroom:board_clear', (payload) => {
+          lastClearTimestamp.value = payload?.cleared_at || Date.now()
+          // 清空主画布和临时画布、重置状态
+          if (ctx && mainCanvas.value) ctx.clearRect(0, 0, mainCanvas.value.width, mainCanvas.value.height)
+          clearTempCanvas()
+          strokeBuffer.value = []
+          if (strokeFlushTimer) { clearTimeout(strokeFlushTimer); strokeFlushTimer = null }
+          currentStrokeId.value = null
+          // 清除记录的分段最后点
+          for (const k of Object.keys(strokeLastPointMap)) delete strokeLastPointMap[k]
+          // 记录空白状态到历史，便于撤销/重做
+          saveHistory()
+        })
+
+        // shape preview / complete
+        props.socket.on('classroom:shape_preview', (payload) => {
+          if (!mainCanvas.value || !tempCanvas.value) return
+          const w = mainCanvas.value.width
+          const h = mainCanvas.value.height
+          const from = { x: payload.from_percent.x * w, y: payload.from_percent.y * h }
+          const to = { x: payload.to_percent.x * w, y: payload.to_percent.y * h }
+          renderRemoteShapePreview(from, to, payload.tool, payload.color, payload.size)
+        })
+        props.socket.on('classroom:shape_complete', (payload) => {
+          if (!mainCanvas.value) return
+          const w = mainCanvas.value.width
+          const h = mainCanvas.value.height
+          const from = { x: payload.from_percent.x * w, y: payload.from_percent.y * h }
+          const to = { x: payload.to_percent.x * w, y: payload.to_percent.y * h }
+          handleRemoteShapeComplete(from, to, payload.tool, payload.color, payload.size)
+          // 记录历史，保证后续 undo/redo 正确
+          saveHistory()
+        })
+
+        // 兼容旧版 drawing 协议（normalized prevX/x 等）
+        props.socket.on('drawing_update', (data) => {
+          if (!mainCanvas.value) return
+          const w = mainCanvas.value.width
+          const h = mainCanvas.value.height
+          const from = {
+            x: (data.prevX !== undefined ? data.prevX : data.from?.x) * w,
+            y: (data.prevY !== undefined ? data.prevY : data.from?.y) * h
+          }
+          const to = {
+            x: (data.x !== undefined ? data.x : data.to?.x) * w,
+            y: (data.y !== undefined ? data.y : data.to?.y) * h
+          }
+          const drawData = {
+            type: 'draw',
+            tool: data.action || data.tool,
+            color: data.color,
+            size: data.brush_size || data.size,
+            from,
+            to
+          }
+          receiveDrawing(drawData)
+        })
       }
     })
-    
+
     onBeforeUnmount(() => {
       window.removeEventListener('resize', resizeCanvas)
       window.removeEventListener('keydown', handleKeyDown)
-      
+
       if (props.socket) {
         props.socket.off('classroom:board_draw')
         props.socket.off('classroom:board_image')
+        props.socket.off('drawing_update')
+        props.socket.off('classroom:board_stroke')
+        props.socket.off('classroom:shape_preview')
+        props.socket.off('classroom:shape_complete')
       }
     })
-    
+
     // 监听Socket变化
     watch(() => props.socket, (newSocket, oldSocket) => {
       if (oldSocket) {
         oldSocket.off('classroom:board_draw')
         oldSocket.off('classroom:board_image')
+        oldSocket.off('drawing_update')
+        oldSocket.off('classroom:board_stroke')
+        oldSocket.off('classroom:shape_preview')
+        oldSocket.off('classroom:shape_complete')
       }
       if (newSocket) {
         newSocket.on('classroom:board_draw', receiveDrawing)
         newSocket.on('classroom:board_image', (data) => {
           setBackgroundImage(data.imageUrl)
+        })
+        newSocket.on('classroom:board_stroke', receiveStroke)
+        newSocket.on('classroom:shape_preview', (payload) => {
+          if (!mainCanvas.value || !tempCanvas.value) return
+          const w = mainCanvas.value.width
+          const h = mainCanvas.value.height
+          const from = { x: payload.from_percent.x * w, y: payload.from_percent.y * h }
+          const to = { x: payload.to_percent.x * w, y: payload.to_percent.y * h }
+          renderRemoteShapePreview(from, to, payload.tool, payload.color, payload.size)
+        })
+        newSocket.on('classroom:shape_complete', (payload) => {
+          if (!mainCanvas.value) return
+          const w = mainCanvas.value.width
+          const h = mainCanvas.value.height
+          const from = { x: payload.from_percent.x * w, y: payload.from_percent.y * h }
+          const to = { x: payload.to_percent.x * w, y: payload.to_percent.y * h }
+          handleRemoteShapeComplete(from, to, payload.tool, payload.color, payload.size)
+        })
+        newSocket.on('drawing_update', (data) => {
+          if (!mainCanvas.value) return
+          const w = mainCanvas.value.width
+          const h = mainCanvas.value.height
+          const from = {
+            x: (data.prevX !== undefined ? data.prevX : data.from?.x) * w,
+            y: (data.prevY !== undefined ? data.prevY : data.from?.y) * h
+          }
+          const to = {
+            x: (data.x !== undefined ? data.x : data.to?.x) * w,
+            y: (data.y !== undefined ? data.y : data.to?.y) * h
+          }
+          const drawData = {
+            type: 'draw',
+            tool: data.action || data.tool,
+            color: data.color,
+            size: data.brush_size || data.size,
+            from,
+            to
+          }
+          receiveDrawing(drawData)
         })
       }
     })
@@ -959,7 +1428,12 @@ export default {
       zoomOut,
       resetZoom,
       setBackgroundImage,
-      receiveDrawing
+      receiveDrawing,
+      // new helpers
+      receiveStroke,
+      emitShapePreview,
+      emitShapeComplete,
+      renderRemoteShapePreview
     }
   }
 }

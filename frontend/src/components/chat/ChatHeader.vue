@@ -110,24 +110,33 @@ const activeClassInfo = ref(null)
 const userRole = ref(sessionStorage.getItem('user_role'))
 const showClassSettings = ref(false)
 
-// 判断是否可以开始授课（班级群且是教师）
+// 判断是否可以开始授课（班级群且不是频道且是教师）
 const canStartClass = computed(() => {
   const conversationType = props.conversation.type
+  const groupSubtype = props.conversation.group_subtype
   const hasClassId = !!props.conversation.class_id
   
   return userRole.value === 'teacher' && 
-         (conversationType === 'class_group' || conversationType === 'course_group') &&
+         conversationType === 'class_group' &&
+         groupSubtype !== 'channel' &&
          hasClassId
 })
 
-// 判断是否有进行中的课堂
+// 判断是否有进行中的课堂（班级群组且不是频道且有活跃课堂）
 const hasActiveClass = computed(() => {
-  return activeClassInfo.value !== null
+  const conversationType = props.conversation.type
+  const groupSubtype = props.conversation.group_subtype
+  return conversationType === 'class_group' && 
+         groupSubtype !== 'channel' && 
+         activeClassInfo.value !== null
 })
 
 // 检查当前班级是否有进行中的课堂
 const checkActiveClass = async () => {
-  if (!props.conversation.class_id) {
+  if (!props.conversation.class_id || 
+      props.conversation.type !== 'class_group' || 
+      props.conversation.group_subtype === 'channel') {
+    activeClassInfo.value = null
     return
   }
   
@@ -147,6 +156,7 @@ const checkActiveClass = async () => {
     }
   } catch (error) {
     console.error('检查活跃课堂失败:', error)
+    activeClassInfo.value = null
   }
 }
 
@@ -216,7 +226,7 @@ const handleJoinClass = async () => {
 
 // 组件挂载时检查活跃课堂
 onMounted(() => {
-  if (canStartClass.value || props.conversation.type === 'class_group') {
+  if (props.conversation.type === 'class_group' && props.conversation.group_subtype !== 'channel') {
     checkActiveClass()
     
     // 每30秒检查一次

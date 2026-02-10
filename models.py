@@ -39,6 +39,7 @@ class Users(db.Model, UserMixin):
     real_name = db.Column(db.String(50), nullable=False)
     phone = db.Column(db.String(20))
     email = db.Column(db.String(100))
+    avatar_url = db.Column(db.String(500))  # 用户头像URL
     role = db.Column(db.String(20), nullable=False, index=True)  # 'admin', 'teacher', 'student'
     status = db.Column(db.SmallInteger, default=1, index=True)  # 0=禁用, 1=激活
     created_at = db.Column(db.DateTime(timezone=True), default=func.now())
@@ -1309,6 +1310,102 @@ class ConversationFolderItem(db.Model):
     __table_args__ = (
         db.UniqueConstraint('folder_id', 'conversation_id', name='uq_folder_conversation'),
     )
+
+
+# ==================== 联系人 / 好友系统 ====================
+class FriendRequest(db.Model):
+    """好友申请表"""
+    __tablename__ = 'FriendRequest'
+
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
+    requester_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'), nullable=False, index=True)
+    target_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'), nullable=False, index=True)
+    status = db.Column(db.String(20), default='pending', index=True)  # 'pending', 'accepted', 'declined', 'cancelled'
+    message = db.Column(db.String(500))
+    created_at = db.Column(db.DateTime(timezone=True), default=func.now())
+    responded_at = db.Column(db.DateTime(timezone=True))
+
+    requester = db.relationship('Users', foreign_keys=[requester_id])
+    target = db.relationship('Users', foreign_keys=[target_id])
+
+    __table_args__ = (
+        db.UniqueConstraint('requester_id', 'target_id', name='uq_friend_request'),
+    )
+
+
+class Friendship(db.Model):
+    """朋友关系表（单向记录，双向插入以表示互为好友）"""
+    __tablename__ = 'Friendship'
+
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
+    user_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'), nullable=False, index=True)
+    friend_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'), nullable=False, index=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=func.now())
+
+    user = db.relationship('Users', foreign_keys=[user_id])
+    friend = db.relationship('Users', foreign_keys=[friend_id])
+
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'friend_id', name='uq_friend_pair'),
+    )
+
+
+class ContactSetting(db.Model):
+    """联系人设置：备注名、是否屏蔽等"""
+    __tablename__ = 'ContactSetting'
+
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=False)
+    user_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'), nullable=False, index=True)
+    contact_id = db.Column(db.BigInteger, db.ForeignKey('Users.user_id'), nullable=False, index=True)
+    alias = db.Column(db.String(100))
+    is_blocked = db.Column(db.Boolean, default=False, index=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=func.now())
+
+    user = db.relationship('Users', foreign_keys=[user_id])
+    contact = db.relationship('Users', foreign_keys=[contact_id])
+
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'contact_id', name='uq_contact_setting'),
+    )
+
+
+def create_friendship_and_private_conversation(user_a_id, user_b_id):
+    """在两个用户之间创建 Friendship 记录（双向）并确保存在一个 private Conversation。
+    返回 Conversation 对象（已存在则复用）。"""
+    # 创建 Friendship（双向）
+    existing_ab = Friendship.query.filter_by(user_id=user_a_id, friend_id=user_b_id).first()
+    # 如果需要同时创建两条 Friendship，先分配连续的 id，避免同一事务内冲突
+    existing_ba = Friendship.query.filter_by(user_id=user_b_id, friend_id=user_a_id).first()
+    if not existing_ab and not existing_ba:
+        base = generate_next_id(Friendship)
+        db.session.add(Friendship(id=base, user_id=user_a_id, friend_id=user_b_id))
+        db.session.add(Friendship(id=base + 1, user_id=user_b_id, friend_id=user_a_id))
+    else:
+        if not existing_ab:
+            db.session.add(Friendship(id=generate_next_id(Friendship), user_id=user_a_id, friend_id=user_b_id))
+        if not existing_ba:
+            db.session.add(Friendship(id=generate_next_id(Friendship), user_id=user_b_id, friend_id=user_a_id))
+
+    # 查找是否已有仅包含两人的 private 会话
+    convs = Conversation.query.filter_by(conversation_type='private').all()
+    for conv in convs:
+        member_ids = [m.user_id for m in conv.members]
+        if set(member_ids) == set([int(user_a_id), int(user_b_id)]):
+            db.session.commit()
+            return conv
+
+    # 创建新的私聊会话，分配连续 ConversationMember id 避免事务内重复
+    conv = Conversation(id=generate_next_id(Conversation), conversation_type='private', created_by=user_a_id)
+    db.session.add(conv)
+    db.session.flush()
+
+    base_m = generate_next_id(ConversationMember)
+    m1 = ConversationMember(id=base_m, conversation_id=conv.id, user_id=user_a_id, role='member')
+    m2 = ConversationMember(id=base_m + 1, conversation_id=conv.id, user_id=user_b_id, role='member')
+    db.session.add_all([m1, m2])
+
+    db.session.commit()
+    return conv
 
 
 class RaiseHandRecord(db.Model):

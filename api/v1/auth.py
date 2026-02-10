@@ -137,6 +137,17 @@ def search_users():
         elif u.role == 'teacher' and u.teacher_profile:
             user_info['teacher_no'] = u.teacher_profile.teacher_no
             
+        # 检查是否已经有私聊对话（即是否为联系人）
+        from models import Conversation, ConversationMember
+        is_contact = False
+        private_convs = Conversation.query.filter_by(conversation_type='private').all()
+        for conv in private_convs:
+            member_ids = [m.user_id for m in conv.members]
+            if set(member_ids) == set([int(g.user.user_id), int(u.user_id)]):
+                is_contact = True
+                break
+        user_info['is_contact'] = is_contact
+            
         results.append(user_info)
     
     return jsonify(results)
@@ -153,6 +164,8 @@ def update_profile():
         g.user.phone = data['phone']
     if 'email' in data:
         g.user.email = data['email']
+    if 'avatar_url' in data:
+        g.user.avatar_url = data['avatar_url']
     
     try:
         from models import db

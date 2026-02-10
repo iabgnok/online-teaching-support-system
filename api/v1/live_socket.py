@@ -74,6 +74,9 @@ def register_socket_events(socketio):
                     'role': participant.role,
                     'timestamp': datetime.now().isoformat()
                 }, room=lesson_id)
+                
+                # 发送参与者人数更新
+                emit('classroom:participant_count', {'count': count}, room=lesson_id)
         except Exception as e:
             print(f"Error in join_class: {e}")
             db.session.rollback()
@@ -110,6 +113,9 @@ def register_socket_events(socketio):
                     'user_id': user_id,
                     'timestamp': datetime.now().isoformat()
                 }, room=lesson_id)
+                
+                # 发送参与者人数更新
+                emit('classroom:participant_count', {'count': count}, room=lesson_id)
         except Exception as e:
             print(f"Error in leave_class: {e}")
             db.session.rollback()
@@ -204,6 +210,70 @@ def register_socket_events(socketio):
             # print(f"Error saving drawing: {e}")
             pass
 
+    @socketio.on('classroom:board_draw')
+    def handle_board_draw(data):
+        """Forward whiteboard draw events to all other participants in the lesson."""
+        lesson_id = data.get('lesson_id')
+        try:
+            emit('classroom:board_draw', data, room=lesson_id, include_self=False)
+        except Exception as e:
+            print(f"Error forwarding classroom:board_draw: {e}")
+            # do not raise to avoid disconnecting socket
+
+    @socketio.on('classroom:board_stroke')
+    def handle_board_stroke(data):
+        """Forward batched whiteboard stroke events to others (improves reliability).
+        Expect data: { lesson_id, stroke_id, tool, color, size, points: [{x_percent,y_percent,t}, ...], isEnd }
+        """
+        lesson_id = data.get('lesson_id')
+        try:
+            emit('classroom:board_stroke', data, room=lesson_id, include_self=False)
+        except Exception as e:
+            print(f"Error forwarding classroom:board_stroke: {e}")
+
+    @socketio.on('classroom:shape_preview')
+    def handle_shape_preview(data):
+        """Forward shape preview (dragging) to others so students can see live preview."""
+        lesson_id = data.get('lesson_id')
+        try:
+            emit('classroom:shape_preview', data, room=lesson_id, include_self=False)
+        except Exception as e:
+            print(f"Error forwarding shape_preview: {e}")
+
+    @socketio.on('classroom:shape_complete')
+    def handle_shape_complete(data):
+        """Forward final shape to others."""
+        lesson_id = data.get('lesson_id')
+        try:
+            emit('classroom:shape_complete', data, room=lesson_id, include_self=False)
+        except Exception as e:
+            print(f"Error forwarding shape_complete: {e}")
+
+    @socketio.on('classroom:board_clear')
+    def handle_board_clear(data):
+        """Forward clear board event and optionally persist state."""
+        lesson_id = data.get('lesson_id')
+        try:
+            emit('classroom:board_clear', data, room=lesson_id, include_self=False)
+        except Exception as e:
+            print(f"Error forwarding board_clear: {e}")
+    @socketio.on('classroom:board_image')
+    def handle_board_image(data):
+        """Forward background image changes and optionally persist if possible."""
+        lesson_id = data.get('lesson_id')
+        try:
+            emit('classroom:board_image', data, room=lesson_id, include_self=False)
+
+            # Optionally persist background image URL to LiveClass if model supports it
+            live_class = LiveClass.query.filter_by(lesson_id=lesson_id).first()
+            if live_class and data.get('imageUrl'):
+                if hasattr(live_class, 'background_image'):
+                    live_class.background_image = data.get('imageUrl')
+                    db.session.commit()
+        except Exception as e:
+            print(f"Error handling classroom:board_image: {e}")
+            db.session.rollback()
+
     @socketio.on('webrtc_offer')
     def handle_webrtc_offer(data):
         lesson_id = data.get('lesson_id')
@@ -218,6 +288,11 @@ def register_socket_events(socketio):
     def handle_webrtc_ice_candidate(data):
         lesson_id = data.get('lesson_id')
         emit('webrtc_ice_candidate', data, room=lesson_id, include_self=False)
+
+    @socketio.on('classroom:screen_share_start')
+    def handle_screen_share_start(data):
+        lesson_id = data.get('lesson_id')
+        emit('classroom:screen_share_started', data, room=lesson_id, include_self=False)
 
     @socketio.on('stop_screen_share')
     def handle_stop_screen_share(data):
@@ -838,6 +913,146 @@ def register_socket_events(socketio):
             
         except Exception as e:
             print(f"Error editing message: {e}")
+            db.session.rollback()
+
+    @socketio.on('classroom:raise_hand')
+    def handle_raise_hand(data):
+        lesson_id = data.get('lesson_id')
+        user_id = data.get('user_id')
+        
+        live_class = LiveClass.query.filter_by(lesson_id=lesson_id).first()
+        if not live_class:
+            return
+        
+        try:
+            # 更新参与者状态
+            participant = LiveParticipant.query.filter_by(
+                live_class_id=live_class.id,
+                user_id=user_id
+            ).first()
+            
+            if participant:
+                participant.is_raising_hand = True
+                db.session.commit()
+                
+                emit('participant_raised_hand', {
+                    'user_id': user_id,
+                    'timestamp': datetime.now().isoformat()
+                }, room=lesson_id)
+        except Exception as e:
+            print(f"Error raising hand: {e}")
+            db.session.rollback()
+
+    @socketio.on('classroom:lower_hand')
+    def handle_lower_hand(data):
+        lesson_id = data.get('lesson_id')
+        user_id = data.get('user_id')
+        
+        live_class = LiveClass.query.filter_by(lesson_id=lesson_id).first()
+        if not live_class:
+            return
+        
+        try:
+            # 更新参与者状态
+            participant = LiveParticipant.query.filter_by(
+                live_class_id=live_class.id,
+                user_id=user_id
+            ).first()
+            
+            if participant:
+                participant.is_raising_hand = False
+                db.session.commit()
+                
+                emit('participant_lowered_hand', {
+                    'user_id': user_id,
+                    'timestamp': datetime.now().isoformat()
+                }, room=lesson_id)
+        except Exception as e:
+            print(f"Error lowering hand: {e}")
+            db.session.rollback()
+
+    @socketio.on('classroom:allow_speak')
+    def handle_allow_speak(data):
+        lesson_id = data.get('lesson_id')
+        student_id = data.get('student_id')
+        allow = data.get('allow', True)
+        
+        live_class = LiveClass.query.filter_by(lesson_id=lesson_id).first()
+        if not live_class:
+            return
+        
+        try:
+            participant = LiveParticipant.query.filter_by(
+                live_class_id=live_class.id,
+                user_id=student_id
+            ).first()
+            
+            if participant:
+                participant.can_speak = allow
+                participant.is_raising_hand = False  # 允许发言时自动放下手
+                db.session.commit()
+                
+                emit('participant_speak_allowed', {
+                    'user_id': student_id,
+                    'can_speak': allow,
+                    'timestamp': datetime.now().isoformat()
+                }, room=lesson_id)
+        except Exception as e:
+            print(f"Error allowing speak: {e}")
+            db.session.rollback()
+
+    @socketio.on('classroom:start_quiz')
+    def handle_start_quiz(data):
+        lesson_id = data.get('lesson_id')
+        user_id = data.get('user_id')
+        
+        live_class = LiveClass.query.filter_by(lesson_id=lesson_id).first()
+        if not live_class or str(live_class.teacher_id) != str(user_id):
+            return
+        
+        try:
+            # 这里可以创建测验记录
+            emit('quiz_started', {
+                'lesson_id': lesson_id,
+                'timestamp': datetime.now().isoformat()
+            }, room=lesson_id)
+        except Exception as e:
+            print(f"Error starting quiz: {e}")
+            db.session.rollback()
+
+    @socketio.on('classroom:share_board')
+    def handle_share_board(data):
+        lesson_id = data.get('lesson_id')
+        user_id = data.get('user_id')
+        board_data = data.get('board_data')
+        
+        live_class = LiveClass.query.filter_by(lesson_id=lesson_id).first()
+        if not live_class:
+            return
+        
+        try:
+            # 发送板书分享消息
+            chat_msg = ChatMessage(
+                id=generate_next_id(ChatMessage),
+                live_class_id=live_class.id,
+                user_id=user_id,
+                message=json.dumps({'board_data': board_data}),
+                message_type='board_share',
+                timestamp=datetime.now()
+            )
+            db.session.add(chat_msg)
+            db.session.commit()
+            
+            emit('new_message', {
+                'id': chat_msg.id,
+                'user_id': chat_msg.user_id,
+                'user_name': 'Teacher',
+                'message': chat_msg.message,
+                'message_type': 'board_share',
+                'timestamp': chat_msg.timestamp.isoformat()
+            }, room=lesson_id)
+        except Exception as e:
+            print(f"Error sharing board: {e}")
             db.session.rollback()
 
 

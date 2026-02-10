@@ -6,7 +6,7 @@ import os
 from models import (
     db, LiveClass, DrawingData, ChatMessage, LiveParticipant, ClassNote,
     TeachingClass, Announcement, generate_next_id, Conversation, ConversationMember,
-    StudentClass, IMMessage
+    StudentClass, IMMessage, MessageStatus
 )
 from datetime import datetime, timedelta
 import uuid
@@ -236,6 +236,7 @@ def join_live_class(lesson_id):
     
     # 获取对应的聊天对话
     conversation = Conversation.query.filter_by(live_class_id=live_class.id).first()
+    print(f"Debug: Found conversation for live_class {live_class.id}: {conversation.id if conversation else None}")
     
     # 从统一聊天系统获取历史消息
     history_messages = []
@@ -260,6 +261,24 @@ def join_live_class(lesson_id):
         conversation_type='class_group'
     ).first()
     
+    # 获取当前在线参与者
+    participants = []
+    live_participants = LiveParticipant.query.filter_by(
+        live_class_id=live_class.id,
+        left_at=None  # 只获取未离开的参与者
+    ).all()
+    
+    for p in live_participants:
+        participants.append({
+            'id': p.user_id,
+            'name': p.user.real_name or p.user.username,
+            'role': p.role,
+            'joined_at': p.joined_at.isoformat(),
+            'online': True,  # 假设所有记录都是在线的
+            'hand_raised': False,
+            'can_speak': p.role == 'teacher'  # 教师默认可以发言
+        })
+    
     # 确定用户角色
     user_role = g.user.role
     if user_role == 'admin':
@@ -273,6 +292,7 @@ def join_live_class(lesson_id):
         'teacher_name': live_class.teacher.real_name,
         'start_time': live_class.start_time.isoformat(),
         'participants_count': live_class.participants_count,
+        'participants': participants,  # 添加参与者列表
         'conversation_id': conversation.id if conversation else None,
         'class_group_conversation_id': class_group_conversation.id if class_group_conversation else None,
         'user_role': user_role,
@@ -282,97 +302,124 @@ def join_live_class(lesson_id):
 @live_class_bp.route('/<lesson_id>/end', methods=['POST'])
 @api_login_required
 def end_live_class(lesson_id):
-    """结束线上授课"""
+    print("=== End Live Class Request ===")
+    print(f"Lesson ID: {lesson_id}")
+    print(f"User: {g.user.user_id}, Role: {g.user.role}")
+
     live_class = LiveClass.query.filter_by(lesson_id=lesson_id).first()
-    
     if not live_class:
         return jsonify({'error': 'Live class not found'}), 404
-    
-    # 暂时移除权限检查用于调试
-    # 检查权限：教师可以结束自己的课堂，管理员可以结束任何课堂
-    # is_teacher = str(live_class.teacher_id) == str(g.user.user_id)
-    # is_admin = g.user.role == 'admin'
-    
-    # print(f"Debug: is_teacher = {is_teacher}, is_admin = {is_admin}")
-    
-    # if not (is_teacher or is_admin):
-    #     print(f"Debug: Access denied - user {g.user.user_id} (role: {g.user.role}) cannot end class {live_class.teacher_id}")
-    #     return jsonify({'error': 'Only teacher or admin can end the class'}), 403
-    
-    # 更新结束时间
-    live_class.end_time = datetime.now()
-    live_class.status = 'ended'
-    
-    # 更新课堂入口消息的状态为 ended
-    # 查找所有包含此课堂 lesson_id 的入口消息
-    import json
-    from extensions import socketio
-    
-    updated_conversations = set()  # 记录需要通知的对话
-    all_entry_messages = IMMessage.query.filter_by(message_type='live_class_entry').all()
-    for msg in all_entry_messages:
-        try:
-            content = json.loads(msg.content)
-            if content.get('lesson_id') == lesson_id:
-                # 更新状态为 ended
-                content['status'] = 'ended'
-                msg.content = json.dumps(content, ensure_ascii=False)
-                updated_conversations.add(msg.conversation_id)
-        except:
-            pass
-    
-    # 删除临时创建的课堂对话及相关数据
-    conversation = Conversation.query.filter_by(live_class_id=live_class.id).first()
-    if conversation:
-        # 删除对话成员
-        ConversationMember.query.filter_by(conversation_id=conversation.id).delete()
-        
-        # 删除对话消息
-        IMMessage.query.filter_by(conversation_id=conversation.id).delete()
-        
-        # 删除对话本身
-        db.session.delete(conversation)
-    
-    db.session.commit()
 
-    # 通知课堂内的用户课堂已结束
-    socketio.emit('class_ended', {'message': 'Class has ended'}, room=lesson_id)
-    
-    # 通知相关对话中的用户刷新消息（课堂入口状态已更新）
-    for conv_id in updated_conversations:
-        socketio.emit('chat:message_updated', {
-            'conversation_id': conv_id,
-            'lesson_id': lesson_id,
-            'status': 'ended'
-        }, room=f'conversation_{conv_id}')
-    
-    # 生成课堂笔记
+    print(f"Found live class: {live_class.id}, status: {live_class.status}")
+
+    is_teacher = str(live_class.teacher_id) == str(g.user.user_id)
+    is_admin = g.user.role == 'admin'
+    if not (is_teacher or is_admin):
+        return jsonify({'error': 'Only teacher or admin can end the class'}), 403
+
+    try:
+        live_class.end_time = datetime.now()
+        live_class.status = 'ended'
+
+        import json
+        from extensions import socketio
+        import traceback
+
+        updated_conversations = set()
+        all_entry_messages = IMMessage.query.filter_by(message_type='live_class_entry').all()
+        for msg in all_entry_messages:
+            try:
+                content = json.loads(msg.content)
+                if content.get('lesson_id') == lesson_id:
+                    content['status'] = 'ended'
+                    msg.content = json.dumps(content, ensure_ascii=False)
+                    updated_conversations.add(msg.conversation_id)
+            except Exception:
+                pass
+
+        conversations = Conversation.query.filter_by(live_class_id=live_class.id).all()
+        if conversations:
+            try:
+                from sqlalchemy import text, bindparam
+                from models import PinnedMessage, ConversationFolderItem
+
+                conv_ids = [c.id for c in conversations]
+
+                # Gather all message IDs across these conversations
+                message_ids = db.session.query(IMMessage.id).filter(IMMessage.conversation_id.in_(conv_ids)).all()
+                message_ids = [mid[0] for mid in message_ids]
+
+                # Delete MessageStatus records for these messages using raw SQL
+                if message_ids:
+                    params = {f'id{i}': mid for i, mid in enumerate(message_ids)}
+                    placeholders = ','.join([f":id{i}" for i in range(len(message_ids))])
+                    db.session.execute(text(f"DELETE FROM MessageStatus WHERE message_id IN ({placeholders})"), params)
+
+                # Delete pinned messages and folder items referencing these conversations
+                PinnedMessage.query.filter(PinnedMessage.conversation_id.in_(conv_ids)).delete(synchronize_session=False)
+                ConversationFolderItem.query.filter(ConversationFolderItem.conversation_id.in_(conv_ids)).delete(synchronize_session=False)
+
+                # Delete other related records
+                ConversationMember.query.filter(ConversationMember.conversation_id.in_(conv_ids)).delete(synchronize_session=False)
+                IMMessage.query.filter(IMMessage.conversation_id.in_(conv_ids)).delete(synchronize_session=False)
+
+                # Finally delete the conversations themselves
+                for c in conversations:
+                    db.session.delete(c)
+
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                db.session.rollback()
+                return jsonify({'error': 'Failed to clean up conversations', 'detail': str(e)}), 500
+
+            # Notify clients in the class room that these conversations were deleted
+            try:
+                for cid in conv_ids:
+                    socketio.emit('chat:conversation_deleted', {'conversation_id': cid}, room=lesson_id)
+            except Exception:
+                pass
+
+        db.session.commit()
+
+        socketio.emit('class_ended', {'message': 'Class has ended'}, room=lesson_id)
+
+        for conv_id in updated_conversations:
+            socketio.emit('chat:message_updated', {
+                'conversation_id': conv_id,
+                'lesson_id': lesson_id,
+                'status': 'ended'
+            }, room=f'conversation_{conv_id}')
+
+    # End of try block
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        db.session.rollback()
+        return jsonify({'error': 'Internal server error', 'detail': str(e)}), 500
+
     drawings = DrawingData.query.filter_by(live_class_id=live_class.id).order_by(DrawingData.timestamp).all()
-    
-    # 从统一聊天系统获取消息
     messages = []
-    if conversation:
-        messages = IMMessage.query.filter_by(
-            conversation_id=conversation.id,
-            is_deleted=False
-        ).order_by(IMMessage.created_at).all()
-    
-    # 简单的笔记生成逻辑
+    # Collect messages across all conversations linked to this live_class (if any remain before deletion)
+    convs_for_messages = Conversation.query.filter_by(live_class_id=live_class.id).all()
+    if convs_for_messages:
+        conv_ids_for_messages = [c.id for c in convs_for_messages]
+        messages = IMMessage.query.filter(IMMessage.conversation_id.in_(conv_ids_for_messages), IMMessage.is_deleted==False).order_by(IMMessage.created_at).all()
+
     note_content = f"课堂主题: {live_class.title}\n"
     note_content += f"开始时间: {live_class.start_time}\n"
     note_content += f"结束时间: {live_class.end_time}\n"
     note_content += f"参与人数: {live_class.participants_count}\n\n"
-    
+
     if drawings:
         note_content += f"画板操作次数: {len(drawings)}\n"
-    
+
     if messages:
         note_content += f"聊天消息数: {len(messages)}\n"
         note_content += "\n聊天记录摘要:\n"
-        for msg in messages[:10]:  # 只显示前10条
+        for msg in messages[:10]:
             note_content += f"- {msg.user.real_name}: {msg.message[:50]}...\n"
-    
-    # 创建笔记
+
     note = ClassNote(
         id=generate_next_id(ClassNote),
         live_class_id=live_class.id,
@@ -380,37 +427,14 @@ def end_live_class(lesson_id):
         title=f"{live_class.title} - 课堂笔记",
         content=note_content
     )
-    
+
     db.session.add(note)
     db.session.commit()
-    
+
     return jsonify({
         'message': 'Live class ended successfully',
         'note_id': note.id
     })
-
-@live_class_bp.route('/<lesson_id>/participants', methods=['GET'])
-@api_login_required
-def get_participants(lesson_id):
-    """获取课堂参与者"""
-    live_class = LiveClass.query.filter_by(lesson_id=lesson_id).first()
-    
-    if not live_class:
-        return jsonify({'error': 'Live class not found'}), 404
-    
-    participants = LiveParticipant.query.filter_by(live_class_id=live_class.id).all()
-    
-    result = []
-    for p in participants:
-        result.append({
-            'user_id': p.user_id,
-            'user_name': p.user.real_name,
-            'role': p.role,
-            'joined_at': p.joined_at.isoformat(),
-            'left_at': p.left_at.isoformat() if p.left_at else None
-        })
-    
-    return jsonify(result)
 
 @live_class_bp.route('/<lesson_id>/notes', methods=['GET'])
 @api_login_required

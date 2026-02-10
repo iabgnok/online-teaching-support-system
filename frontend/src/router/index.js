@@ -13,7 +13,7 @@ import Forum from '../views/Forum.vue'
 import Messages from '../views/Messages.vue'
 
 import Chat from '../views/Chat.vue'
-
+import Contacts from '../views/Contacts.vue'
 import Schedule from '../views/student/Schedule.vue'
 
 import SubmitAssignment from '../views/student/SubmitAssignment.vue'
@@ -105,6 +105,7 @@ const routes = [
   { path: '/messages', component: Messages },
 
   { path: '/chat', component: Chat },
+  { path: '/contacts', component: Contacts },
 
   { path: '/schedule', component: Schedule },
 

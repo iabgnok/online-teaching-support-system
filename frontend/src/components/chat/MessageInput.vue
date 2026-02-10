@@ -369,7 +369,6 @@ const handleShareBoard = () => {
 
 const handleScreenShare = () => {
   emit('screen-share')
-  ElMessage.success('屏幕共享功能')
 }
 
 const handleStartPoll = () => {

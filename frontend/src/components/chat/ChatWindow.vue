@@ -92,6 +92,7 @@
       @publish-task="$emit('publish-task')"
       @share-board="$emit('share-board')"
       @raise-hand="$emit('raise-hand', $event)"
+      @screen-share="$emit('screen-share')"
     />
   </div>
 </template>
@@ -144,7 +145,8 @@ const emit = defineEmits([
   'start-attendance',
   'publish-task',
   'share-board',
-  'raise-hand'
+  'raise-hand',
+  'screen-share'
 ])
 
 const messageListRef = ref(null)
