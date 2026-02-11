@@ -53,8 +53,9 @@
       <div class="main-content">
         <!-- 左侧：画板区域 -->
         <div class="whiteboard-wrapper">
-          <!-- 画板组件 -->
+          <!-- 画板组件 (延迟挂载直到课堂信息加载完，避免初始只读导致 UI 不一致) -->
           <WhiteBoard
+            v-if="lessonInfo"
             ref="whiteboardRef"
             :lesson-id="lessonId"
             :readonly="whiteboardReadonly"

@@ -79,7 +79,7 @@
     <div class="participants-panel" v-if="showParticipants">
       <h3>在线参与者</h3>
       <ul>
-        <li v-for="participant in participants" :key="participant.user_id">
+        <li v-for="(participant, idx) in participants" :key="participant.id || participant.user_id || participant.userId || participant.user_name || idx">
           {{ participant.user_name }} ({{ participant.role }})
         </li>
       </ul>
@@ -501,16 +501,10 @@ export default {
     initCanvas() {
       this.canvas = this.$refs.canvas
       this.ctx = this.canvas.getContext('2d')
-      this.resizeCanvas()
-      window.addEventListener('resize', this.resizeCanvas)
-    },
-
-    resizeCanvas() {
-      if (this.canvas) {
-        const container = this.canvas.parentElement
-        this.canvas.width = container.clientWidth
-        this.canvas.height = container.clientHeight
-      }
+      // 画布为固定逻辑尺寸，不随容器变化
+      // 可在这里设置固定 backing store 大小，例如：
+      // this.canvas.width = 1920
+      // this.canvas.height = 1080
     },
 
     loadParticipants() {

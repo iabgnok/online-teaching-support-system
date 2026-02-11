@@ -47,7 +47,7 @@
     <div class="participants-panel" v-if="showParticipants">
       <h3>在线参与者</h3>
       <ul>
-        <li v-for="participant in participants" :key="participant.user_id">
+        <li v-for="(participant, idx) in participants" :key="participant.id || participant.user_id || participant.userId || participant.user_name || idx">
           {{ participant.user_name }} ({{ participant.role }})
         </li>
       </ul>

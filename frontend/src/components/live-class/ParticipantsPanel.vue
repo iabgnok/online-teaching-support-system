@@ -52,8 +52,8 @@
             教师 ({{ filteredTeachers.length }})
           </div>
           <div 
-            v-for="teacher in filteredTeachers" 
-            :key="teacher.id"
+            v-for="(teacher, tIdx) in filteredTeachers" 
+            :key="teacher.id || teacher.user_id || teacher.name || tIdx"
             class="participant-item teacher"
           >
             <div class="avatar">
@@ -79,8 +79,8 @@
           </div>
           <div class="participants-list">
             <div 
-              v-for="student in filteredStudents" 
-              :key="student.id"
+              v-for="(student, sIdx) in filteredStudents" 
+              :key="student.id || student.user_id || student.name || sIdx"
               class="participant-item"
               :class="{ 'hand-raised': student.hand_raised }"
             >

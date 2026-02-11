@@ -59,7 +59,7 @@ export function useLiveClass(options = {}) {
   // 屏幕共享
   const isScreenSharing = ref(false)
   const screenShareStream = ref(null)
-  const screenSharePeerConnection = ref(null)
+  let screenSharePeerConnection = ref(null)
   
   // 对话ID
   const discussionConversationId = ref(null)
@@ -70,6 +70,14 @@ export function useLiveClass(options = {}) {
   const isStudent = computed(() => userRole.value === 'student')
   const isLive = computed(() => classroomStatus.value === 'in_progress')
   const isEnded = computed(() => classroomStatus.value === 'ended')
+
+  // debug: 监测白板只读状态和用户角色变化（临时）
+  watch(() => userRole.value, (val) => {
+    console.log('useLiveClass: userRole changed to', val)
+  })
+  watch(() => whiteboardReadonly.value, (val) => {
+    console.log('useLiveClass: whiteboardReadonly changed to', val, 'userRole=', userRole.value)
+  })
   
   const formattedDuration = computed(() => {
     const hours = Math.floor(duration.value / 3600)
@@ -84,6 +92,25 @@ export function useLiveClass(options = {}) {
   
   // ==================== 方法 ====================
   
+  // 规范化参与者对象，保证 id、user_id、name、role 等字段稳定
+  const normalizeParticipant = (p, idx) => {
+    const idRaw = p.id ?? p.user_id ?? p.userId ?? null
+    const id = idRaw ?? `missing_${Date.now()}_${idx}_${Math.random().toString(36).slice(2,6)}`
+    const userIdField = p.user_id ?? p.userId ?? idRaw ?? null
+    return {
+      id,
+      user_id: userIdField,
+      name: p.name ?? p.user_name ?? p.real_name ?? '',
+      role: p.role ?? p.user_role ?? 'student',
+      avatar: p.avatar ?? p.avatar_url ?? null,
+      online: p.online ?? true,
+      hand_raised: p.hand_raised ?? false,
+      can_speak: p.can_speak ?? false,
+      last_active: p.last_active ?? p.last_seen_at ?? null,
+      ...p
+    }
+  }
+
   // 加载课程信息
   const loadLessonInfo = async () => {
     if (!lessonId.value) {
@@ -108,8 +135,9 @@ export function useLiveClass(options = {}) {
         participants_count: data.participants_count
       }
       
-      // 使用后端返回的用户角色（如果有的话）
-      userRole.value = data.user_role || localStorage.getItem('role') || 'student'
+      // 使用后端返回的用户角色（如果有的话），兼容多种存储键并打印调试信息
+      userRole.value = data.user_role || data.role || sessionStorage.getItem('user_role') || sessionStorage.getItem('role') || localStorage.getItem('role') || 'student'
+      console.log('useLiveClass: userRole resolved to', userRole.value, { fromData: data.user_role || data.role })
       
       // 课堂状态：如果能加入就是活跃的
       classroomStatus.value = 'in_progress'
@@ -130,9 +158,23 @@ export function useLiveClass(options = {}) {
       // 画板只读状态（学生只读，教师可编辑）
       whiteboardReadonly.value = userRole.value !== 'teacher'
       
-      // 加载参与者列表
+      // 加载参与者列表并规范化字段，保证在模板中可用的 key（id）存在
       if (data.participants) {
-        participants.value = data.participants
+        participants.value = data.participants.map((p, idx) => normalizeParticipant(p, idx))
+
+        // 如果当前用户存在于 participants 中，使用该记录的 role 来覆盖 userRole（更准确）
+        const me = participants.value.find(p => Number(p.id) === Number(userId.value) || Number(p.user_id) === Number(userId.value) || String(p.user_id) === String(userId.value))
+        if (me && me.role) {
+          userRole.value = me.role
+          whiteboardReadonly.value = userRole.value !== 'teacher'
+          console.log('useLiveClass: userRole updated from participants to', userRole.value)
+        }
+
+        // 打印统计信息，便于调试
+        const missingCount = participants.value.filter(p => String(p.id).startsWith('missing_')).length
+        if (missingCount) {
+          console.warn(`useLiveClass: ${missingCount} participants lacked an id and were given fallback ids`, participants.value.filter(p => String(p.id).startsWith('missing_')))
+        }
       }
       
     } catch (err) {
@@ -215,42 +257,51 @@ export function useLiveClass(options = {}) {
     
     // 参与者事件
     socket.value.on('classroom:participant_joined', (participant) => {
-      const index = participants.value.findIndex(p => p.id === participant.id)
+      const p = normalizeParticipant(participant)
+      const index = participants.value.findIndex(x => x.id === p.id || String(x.user_id) === String(p.user_id) || x.name === p.name)
       if (index > -1) {
-        participants.value[index] = { ...participants.value[index], ...participant, online: true }
+        // 保持同一个对象引用更安全（避免 key 改变导致 patch 错误）
+        participants.value.splice(index, 1, { ...participants.value[index], ...p, online: true })
       } else {
-        participants.value.push({ ...participant, online: true })
+        participants.value.push({ ...p, online: true })
+      }
+
+      // 如果是当前用户，更新角色和白板权限
+      if (Number(p.user_id) === Number(userId.value) || Number(p.id) === Number(userId.value)) {
+        userRole.value = p.role
+        whiteboardReadonly.value = userRole.value !== 'teacher'
+        console.log('useLiveClass: userRole updated on participant_joined to', userRole.value)
       }
     })
 
     // 兼容后端现有广播事件名（user_joined / user_left）
     socket.value.on('user_joined', (data) => {
-      const participant = {
-        id: data.user_id,
-        name: data.user_name,
-        role: data.role || 'student',
-        joined_at: data.timestamp,
-        online: true
-      }
-      const idx = participants.value.findIndex(p => p.id === participant.id)
+      const p = normalizeParticipant({ id: data.user_id, user_id: data.user_id, name: data.user_name, role: data.role, joined_at: data.timestamp, online: true })
+      const idx = participants.value.findIndex(x => x.id === p.id || String(x.user_id) === String(p.user_id) || x.name === p.name)
       if (idx > -1) {
-        participants.value[idx] = { ...participants.value[idx], ...participant }
+        participants.value.splice(idx, 1, { ...participants.value[idx], ...p })
       } else {
-        participants.value.push(participant)
+        participants.value.push(p)
+      }
+
+      if (Number(p.user_id) === Number(userId.value)) {
+        userRole.value = p.role
+        whiteboardReadonly.value = userRole.value !== 'teacher'
+        console.log('useLiveClass: userRole updated on user_joined to', userRole.value)
       }
     })
 
     socket.value.on('user_left', (data) => {
-      const index = participants.value.findIndex(p => p.id === data.user_id)
-      if (index > -1) {
-        participants.value[index].online = false
+      const idx = participants.value.findIndex(x => x.id === data.user_id || String(x.user_id) === String(data.user_id))
+      if (idx > -1) {
+        participants.value[idx] = { ...participants.value[idx], online: false }
       }
     })
     
     socket.value.on('classroom:participant_left', (data) => {
-      const index = participants.value.findIndex(p => p.id === data.user_id)
-      if (index > -1) {
-        participants.value[index].online = false
+      const idx = participants.value.findIndex(x => x.id === data.user_id || String(x.user_id) === String(data.user_id))
+      if (idx > -1) {
+        participants.value.splice(idx, 1, { ...participants.value[idx], online: false })
       }
     })
     
@@ -273,25 +324,23 @@ export function useLiveClass(options = {}) {
     
     // 举手事件
     socket.value.on('participant_raised_hand', (data) => {
-      const index = participants.value.findIndex(p => p.id === data.user_id)
-      if (index > -1) {
-        participants.value[index].hand_raised = true
-        participants.value[index].hand_raised_at = data.timestamp
+      const idx = participants.value.findIndex(x => x.id === data.user_id || String(x.user_id) === String(data.user_id))
+      if (idx > -1) {
+        participants.value.splice(idx, 1, { ...participants.value[idx], hand_raised: true, hand_raised_at: data.timestamp })
       }
     })
     
     socket.value.on('participant_lowered_hand', (data) => {
-      const index = participants.value.findIndex(p => p.id === data.user_id)
-      if (index > -1) {
-        participants.value[index].hand_raised = false
+      const idx = participants.value.findIndex(x => x.id === data.user_id || String(x.user_id) === String(data.user_id))
+      if (idx > -1) {
+        participants.value.splice(idx, 1, { ...participants.value[idx], hand_raised: false })
       }
     })
     
     socket.value.on('participant_speak_allowed', (data) => {
-      const index = participants.value.findIndex(p => p.id === data.user_id)
-      if (index > -1) {
-        participants.value[index].can_speak = data.can_speak
-        participants.value[index].hand_raised = false
+      const idx = participants.value.findIndex(x => x.id === data.user_id || String(x.user_id) === String(data.user_id))
+      if (idx > -1) {
+        participants.value.splice(idx, 1, { ...participants.value[idx], can_speak: data.can_speak, hand_raised: false })
       }
     })
     

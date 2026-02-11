@@ -228,10 +228,7 @@
       <!-- 画布包装器 (承载位移和缩放) -->
       <div 
         class="canvas-wrapper" 
-        :style="{
-          transform: `translate(${offsetX}px, ${offsetY}px) scale(${scale})`,
-          transformOrigin: '0 0'
-        }"
+        :style="canvasWrapperStyle"
       >
         <!-- 画板视口 (Viewport) -->
         <div class="whiteboard-viewport">
@@ -332,6 +329,12 @@ export default {
   },
   emits: ['board-updated'],
   setup(props, { emit }) {
+    // debug: 打印白板接收的 props（临时）
+    console.log('WhiteBoard mounted with props:', { lessonId: props.lessonId, readonly: props.readonly, socket: !!props.socket })
+    watch(() => props.readonly, (val) => {
+      console.log('WhiteBoard: readonly prop changed ->', val)
+    })
+
     // 存储正在接收的分段 stroke 的最后一点
     const strokeLastPointMap = {}
     // ========== Refs ==========
@@ -352,6 +355,14 @@ export default {
     const offsetX = ref(0)
     const offsetY = ref(0)
     const scale = ref(1)
+
+    // 固定画布配置（若需要固定逻辑分辨率，请设置为 true）
+    const FIXED_CANVAS = true
+    const FIXED_CANVAS_WIDTH = 1920
+    const FIXED_CANVAS_HEIGHT = 1080
+
+    // 调试开关（部署后可设为 false）
+    const DEBUG = true
     
     // 绘制状态
     const isDrawing = ref(false)
@@ -401,11 +412,47 @@ export default {
       // 变换已移至canvas-wrapper，这里不再需要
       transform: 'none'
     }))
+
+    // canvas-wrapper 的样式（包含 translate/scale），在 FIXED_CANVAS 模式下同时固定显示尺寸，避免外层布局变化拉伸画布
+    const canvasWrapperStyle = computed(() => {
+      const base = {
+        transform: `translate(${offsetX.value}px, ${offsetY.value}px) scale(${scale.value})`,
+        transformOrigin: '0 0'
+      }
+
+      if (FIXED_CANVAS) {
+        base.width = FIXED_CANVAS_WIDTH + 'px'
+        base.height = FIXED_CANVAS_HEIGHT + 'px'
+        // 保证容器不因父级 flex/百分比布局而伸缩
+        base.minWidth = FIXED_CANVAS_WIDTH + 'px'
+        base.minHeight = FIXED_CANVAS_HEIGHT + 'px'
+      } else {
+        base.width = '100%'
+        base.height = '100%'
+      }
+
+      return base
+    })
     
     // ========== Canvas Context ==========
     let ctx = null
     let tempCtx = null
-    
+    // ResizeObserver 用于在父容器大小变化（例如聊天栏折叠）时保持画布显示尺寸不被拉伸
+    let resizeObserver = null
+
+    // 将 backing store（逻辑像素）和显示尺寸（CSS 像素）分离：
+    // 对于 FIXED_CANVAS，我们强制 canvas 的 CSS 尺寸为固定像素，以避免父容器布局变化导致的视觉缩放
+    const applyFixedDisplaySize = () => {
+      if (!mainCanvas.value || !tempCanvas.value) return
+      if (FIXED_CANVAS) {
+        // 强制设置为固定显示尺寸（以逻辑尺寸为基准）
+        mainCanvas.value.style.width = FIXED_CANVAS_WIDTH + 'px'
+        mainCanvas.value.style.height = FIXED_CANVAS_HEIGHT + 'px'
+        tempCanvas.value.style.width = FIXED_CANVAS_WIDTH + 'px'
+        tempCanvas.value.style.height = FIXED_CANVAS_HEIGHT + 'px'
+      }
+    }
+
     // ========== Methods ==========
     const initCanvas = () => {
       if (!mainCanvas.value || !tempCanvas.value) {
@@ -415,22 +462,56 @@ export default {
         }, 100)
         return
       }
-      
-      ctx = mainCanvas.value.getContext('2d', { willReadFrequently: true })
-      tempCtx = tempCanvas.value.getContext('2d', { willReadFrequently: true })
-      
-      // 设置固定的逻辑分辨率，不再随窗口变化
-      mainCanvas.value.width = 1920
-      mainCanvas.value.height = 1080
-      tempCanvas.value.width = 1920
-      tempCanvas.value.height = 1080
-      
-      // 重新设置画布样式
-      if (ctx) {
-        ctx.lineCap = 'round'
-        ctx.lineJoin = 'round'
+
+      ctx = mainCanvas.value.getContext('2d')
+      tempCtx = tempCanvas.value.getContext('2d')
+      if (DEBUG) console.info('[WhiteBoard] initCanvas', { mainW: mainCanvas.value.width, mainH: mainCanvas.value.height, cssW: mainCanvas.value.clientWidth, cssH: mainCanvas.value.clientHeight, dpr: window.devicePixelRatio, ctx: !!ctx, tempCtx: !!tempCtx })
+
+      // --- 设置 backing store（支持固定逻辑尺寸或 DPR 缩放） ---
+      // 将 backing store 与 DPR 一致化，避免因高 DPI 导致的模糊
+      const dpr = window.devicePixelRatio || 1
+      if (FIXED_CANVAS) {
+        // 注意：对固定逻辑分辨率，backing store 使用 *dpr，样式使用逻辑像素
+        mainCanvas.value.width = Math.max(1, Math.floor(FIXED_CANVAS_WIDTH * dpr))
+        mainCanvas.value.height = Math.max(1, Math.floor(FIXED_CANVAS_HEIGHT * dpr))
+        tempCanvas.value.width = mainCanvas.value.width
+        tempCanvas.value.height = mainCanvas.value.height
+
+        // 将 CSS 宽高设置为逻辑像素（与 .canvas-transform-wrapper 保持一致）
+        mainCanvas.value.style.width = FIXED_CANVAS_WIDTH + 'px'
+        mainCanvas.value.style.height = FIXED_CANVAS_HEIGHT + 'px'
+        tempCanvas.value.style.width = FIXED_CANVAS_WIDTH + 'px'
+        tempCanvas.value.style.height = FIXED_CANVAS_HEIGHT + 'px'
+
+        // 使用上下文缩放抵消 backing store 的 DPR，使后续绘制坐标以逻辑像素为单位
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+        tempCtx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      } else {
+        // 根据实际 CSS 尺寸设置 backing store
+        const cssW = mainCanvas.value.clientWidth || mainCanvas.value.offsetWidth || 300
+        const cssH = mainCanvas.value.clientHeight || mainCanvas.value.offsetHeight || 150
+        mainCanvas.value.width = Math.max(1, Math.floor(cssW * dpr))
+        mainCanvas.value.height = Math.max(1, Math.floor(cssH * dpr))
+        tempCanvas.value.width = mainCanvas.value.width
+        tempCanvas.value.height = mainCanvas.value.height
+        mainCanvas.value.style.width = cssW + 'px'
+        mainCanvas.value.style.height = cssH + 'px'
+        tempCanvas.value.style.width = cssW + 'px'
+        tempCanvas.value.style.height = cssH + 'px'
+
+        // 上下文按 DPR 缩放
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+        tempCtx.setTransform(dpr, 0, 0, dpr, 0, 0)
       }
-      
+
+      // 默认样式
+      if (ctx && tempCtx) {
+        ctx.lineCap = ctx.lineJoin = tempCtx.lineCap = tempCtx.lineJoin = 'round'
+        ctx.lineWidth = brushSize.value
+        tempCtx.clearRect(0, 0, tempCanvas.value.width, tempCanvas.value.height)
+      }
+      // -----------------------
+
       // 保存初始状态
       saveHistory()
     }
@@ -456,38 +537,69 @@ export default {
     const getEventPoint = (e) => {
       if (!mainCanvas.value) return { x: 0, y: 0 }
 
-      // 获取whiteboard-container的边界作为视口
-      const whiteboardRef = mainCanvas.value.closest('.whiteboard-container')
-      if (!whiteboardRef) return { x: 0, y: 0 }
-      
-      const rect = whiteboardRef.getBoundingClientRect()
+      // 使用 canvas 自身的边界作为参考（避免 toolbar 或外层布局偏移）
+      const rect = mainCanvas.value.getBoundingClientRect()
       const clientX = e.touches ? e.touches[0].clientX : e.clientX
       const clientY = e.touches ? e.touches[0].clientY : e.clientY
       
-      // 1. 计算鼠标相对于视口左上角的距离
+      // 1. 计算鼠标相对于视口左上角的距离（CSS 像素）
       const xInViewport = clientX - rect.left
       const yInViewport = clientY - rect.top
 
-      // 2. 减去偏移量，再除以缩放比例，得到画布上的绝对坐标
-      const logicalX = (xInViewport - offsetX.value) / scale.value
-      const logicalY = (yInViewport - offsetY.value) / scale.value
-      
-      return { x: logicalX, y: logicalY }
+      // 2. 去除视口缩放/偏移变换（由 canvas-wrapper 的 transform 控制，单位为 CSS 像素）
+      // 注意：canvas 的 getBoundingClientRect() 已经反映了 wrapper 的 translate/scale
+      // 因此不应再减去 offsetX/offsetY，也不应额外除以 scale，否则会造成坐标放大（双重缩放）
+      const preTransformX = xInViewport
+      const preTransformY = yInViewport
+
+      // 3. 将 CSS 像素坐标映射到逻辑画布坐标
+      if (FIXED_CANVAS) {
+        // 使用 getBoundingClientRect 的尺寸作为实际显示尺寸
+        const displayW = rect.width
+        const displayH = rect.height
+        const dpr = window.devicePixelRatio || 1
+        
+        // 调试信息（加入 offset 和 scale，便于验证）
+        if (DEBUG) console.debug('[getEventPoint]', {
+          rectW: rect.width, rectH: rect.height,
+          displayW, displayH,
+          FIXED_CANVAS_WIDTH, FIXED_CANVAS_HEIGHT,
+          dpr,
+          xInViewport, yInViewport,
+          offsetX: offsetX.value, offsetY: offsetY.value, scale: scale.value,
+          preTransformX, preTransformY
+        })
+        
+        // 将显示坐标（CSS 像素）映射到逻辑坐标（FIXED_CANVAS 的像素）
+        const logicalX = (preTransformX / displayW) * FIXED_CANVAS_WIDTH
+        const logicalY = (preTransformY / displayH) * FIXED_CANVAS_HEIGHT
+        return { x: logicalX, y: logicalY }
+      } else {
+        // 非固定画布，通过 DPR 做映射
+        const dpr = window.devicePixelRatio || 1
+        const logicalX = preTransformX * dpr
+        const logicalY = preTransformY * dpr
+        return { x: logicalX, y: logicalY }
+      }
     }
     
     const handleMouseDown = (e) => {
-      if (props.readonly || !ctx) return
+      if (props.readonly) return
 
-      // 检查是否为右键点击（平移模式）
+      // 检查是否为右键点击（平移模式） - 允许在 ctx 未建立前也能平移
       if (e.button === 2) {
         isPanning.value = true
         panStartPoint.x = e.clientX - offsetX.value
         panStartPoint.y = e.clientY - offsetY.value
-        mainCanvas.value.style.cursor = 'grabbing'
+        if (mainCanvas.value) mainCanvas.value.style.cursor = 'grabbing'
+        if (DEBUG) console.debug('[WhiteBoard] mousedown (pan start)', { clientX: e.clientX, clientY: e.clientY, offsetX: offsetX.value, offsetY: offsetY.value })
         return
       }
 
+      if (!ctx) { if (DEBUG) console.warn('[WhiteBoard] mousedown but ctx not ready'); return }
+
       const point = getEventPoint(e)
+      if (DEBUG) console.debug('[WhiteBoard] mousedown point', point)
       startPoint.x = point.x
       startPoint.y = point.y
       lastPoint.x = point.x
@@ -520,12 +632,14 @@ export default {
       if (isPanning.value) {
         offsetX.value = e.clientX - panStartPoint.x
         offsetY.value = e.clientY - panStartPoint.y
+        if (DEBUG) console.debug('[WhiteBoard] panning', { offsetX: offsetX.value, offsetY: offsetY.value })
         return
       }
 
       if (!isDrawing.value || props.readonly || !ctx) return
 
       const point = getEventPoint(e)
+      if (DEBUG) console.debug('[WhiteBoard] mousemove point', point)
 
       if (['pen', 'highlighter', 'eraser'].includes(currentTool.value)) {
         // 自由绘制（本地即时渲染）
@@ -600,6 +714,47 @@ export default {
       // 右键菜单已通过 @contextmenu.prevent 阻止
       // 此函数为占位符，确保事件绑定正确
     }
+
+    // 全局处理：确保在画布外释放鼠标或触摸时能够正确结束平移/绘制
+    const onWindowMouseMove = (e) => {
+      if (isPanning.value) {
+        offsetX.value = e.clientX - panStartPoint.x
+        offsetY.value = e.clientY - panStartPoint.y
+      }
+    }
+
+    const onWindowMouseUp = (e) => {
+      // 结束平移
+      if (isPanning.value) {
+        isPanning.value = false
+        if (mainCanvas.value) mainCanvas.value.style.cursor = 'crosshair'
+      }
+
+      // 如果在画布外释放鼠标，确保结束绘制
+      if (isDrawing.value && mainCanvas.value && !mainCanvas.value.contains(e.target)) {
+        handleMouseUp(e)
+      }
+    }
+
+    const onWindowTouchMove = (e) => {
+      if (!e.touches || e.touches.length === 0) return
+      if (isPanning.value) {
+        const t = e.touches[0]
+        offsetX.value = t.clientX - panStartPoint.x
+        offsetY.value = t.clientY - panStartPoint.y
+      }
+    }
+
+    const onWindowTouchEnd = (e) => {
+      if (isPanning.value) {
+        isPanning.value = false
+        if (mainCanvas.value) mainCanvas.value.style.cursor = 'crosshair'
+      }
+
+      if (isDrawing.value) {
+        handleMouseUp(e)
+      }
+    }
     
     const beginPath = (point) => {
       if (!ctx) return
@@ -631,6 +786,7 @@ export default {
     
     const drawLine = (from, to) => {
       if (!ctx) return
+      if (DEBUG) console.debug('[WhiteBoard] drawLine', { from, to })
       
       applyToolStyle()
       ctx.beginPath()
@@ -641,6 +797,7 @@ export default {
     }
     
     const drawShapePreview = (point) => {
+      if (!tempCtx || !tempCanvas.value) return
       clearTempCanvas()
       tempCtx.strokeStyle = currentColor.value
       tempCtx.lineWidth = brushSize.value
@@ -722,15 +879,28 @@ export default {
     }
     
     const clearTempCanvas = () => {
+      if (!tempCtx || !tempCanvas.value) return
+      // 在清空前设置 transform 为 identity（以 device/backing store 像素为单位清空），随后恢复为按逻辑像素绘制的 transform
+      const dpr = window.devicePixelRatio || 1
+      tempCtx.setTransform(1, 0, 0, 1, 0, 0)
       tempCtx.clearRect(0, 0, tempCanvas.value.width, tempCanvas.value.height)
+      tempCtx.setTransform(dpr, 0, 0, dpr, 0, 0)
     }
 
     // ========== Stroke buffering & smoothing helpers ==========
+    const getCanvasCssSize = () => {
+      // 返回当前 CSS 像素尺寸（用于把 CSS 坐标转换到逻辑坐标）
+      const cssW = mainCanvas.value ? (mainCanvas.value.clientWidth || mainCanvas.value.offsetWidth) : 0
+      const cssH = mainCanvas.value ? (mainCanvas.value.clientHeight || mainCanvas.value.offsetHeight) : 0
+      return { cssW, cssH }
+    }
+
     const addPointToStroke = (point) => {
       if (!mainCanvas.value) return
-      const w = mainCanvas.value.width
-      const h = mainCanvas.value.height
-      strokeBuffer.value.push({ x_percent: point.x / w, y_percent: point.y / h, t: Date.now() })
+      // 使用固定逻辑尺寸作为基准来计算百分比
+      const logicalW = FIXED_CANVAS ? FIXED_CANVAS_WIDTH : mainCanvas.value.width
+      const logicalH = FIXED_CANVAS ? FIXED_CANVAS_HEIGHT : mainCanvas.value.height
+      strokeBuffer.value.push({ x_percent: point.x / logicalW, y_percent: point.y / logicalH, t: Date.now() })
 
       // 如果缓冲已满立刻发送
       if (strokeBuffer.value.length >= STROKE_MAX_POINTS) {
@@ -769,15 +939,16 @@ export default {
 
     const drawStrokePoints = (points, tool, color, size, strokeId) => {
       if (!ctx || !mainCanvas.value || !points || points.length === 0) return
-      const w = mainCanvas.value.width
-      const h = mainCanvas.value.height
+      // 使用逻辑坐标作为绘制基准（固定尺寸模式下为 FIXED_CANVAS_WIDTH/HEIGHT）
+      const logicalW = FIXED_CANVAS ? FIXED_CANVAS_WIDTH : mainCanvas.value.width
+      const logicalH = FIXED_CANVAS ? FIXED_CANVAS_HEIGHT : mainCanvas.value.height
 
-      // 将百分比转换为像素并密化（插值）以填补大间隔
+      // 将百分比转换为逻辑像素并密化（插值）以填补大间隔
       const pts = []
       for (let i = 0; i < points.length; i++) {
         const p = points[i]
-        const x = (p.x_percent !== undefined) ? p.x_percent * w : (p.x || 0)
-        const y = (p.y_percent !== undefined) ? p.y_percent * h : (p.y || 0)
+        const x = (p.x_percent !== undefined) ? p.x_percent * logicalW : (p.x || 0)
+        const y = (p.y_percent !== undefined) ? p.y_percent * logicalH : (p.y || 0)
         pts.push({ x, y })
       }
 
@@ -944,24 +1115,46 @@ export default {
     
     const restoreFromHistory = () => {
       const imageData = history.value[historyIndex.value]
+      if (!imageData) return
       const img = new Image()
       img.onload = () => {
-        ctx.clearRect(0, 0, mainCanvas.value.width, mainCanvas.value.height)
-        ctx.drawImage(img, 0, 0)
+        if (!ctx || !mainCanvas.value) return
+
+        if (FIXED_CANVAS) {
+          // 直接以 backing store（backing store 已按 DPR 扩展）绘制，然后恢复到按逻辑像素绘制的 transform
+          ctx.setTransform(1, 0, 0, 1, 0, 0)
+          ctx.clearRect(0, 0, mainCanvas.value.width, mainCanvas.value.height)
+          ctx.drawImage(img, 0, 0, mainCanvas.value.width, mainCanvas.value.height)
+          // 恢复到按逻辑像素绘制（与 initCanvas 中对 fixed 模式的 ctx.setTransform 保持一致）
+          const dpr = window.devicePixelRatio || 1
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+        } else {
+          // 对于动态 backing store，我们需要考虑 DPR
+          ctx.setTransform(1, 0, 0, 1, 0, 0)
+          ctx.clearRect(0, 0, mainCanvas.value.width, mainCanvas.value.height)
+          ctx.drawImage(img, 0, 0, mainCanvas.value.width, mainCanvas.value.height)
+          const dpr = window.devicePixelRatio || 1
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+        }
       }
       img.src = imageData
     }
+
     
+
     const clearCanvas = () => {
       if (!ctx || !mainCanvas.value) return
 
-      // 先取消并清空正在缓冲的 stroke，防止清空后缓冲数据被发送回来
-      strokeBuffer.value = []
       if (strokeFlushTimer) { clearTimeout(strokeFlushTimer); strokeFlushTimer = null }
       currentStrokeId.value = null
 
-      // 清空主画布与临时画布
-      ctx.clearRect(0, 0, mainCanvas.value.width, mainCanvas.value.height)
+      // 清空主画布与临时画布（先重置 transform 再恢复，避免 DPR 导致的坐标不一致）
+      {
+        const dpr = window.devicePixelRatio || 1
+        ctx.setTransform(1, 0, 0, 1, 0, 0)
+        ctx.clearRect(0, 0, mainCanvas.value.width, mainCanvas.value.height)
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      }
       clearTempCanvas()
       saveHistory()
 
@@ -984,7 +1177,7 @@ export default {
       reader.onload = (event) => {
         const img = new Image()
         img.onload = () => {
-          // 缩放图片以适应画布
+          // 缩放图片以适应画布（基于逻辑 backing store）
           const scale = Math.min(
             mainCanvas.value.width / img.width,
             mainCanvas.value.height / img.height,
@@ -1010,10 +1203,14 @@ export default {
       
       e.target.value = ''
     }
-    
+
+    // 背景图加载回调（不再自动调整画布大小，画布为固定逻辑尺寸）
     const onBackgroundLoad = () => {
-      resizeCanvas()
+      // No-op: fixed canvas mode avoids resizing on background load.
+      // If needed, we can call restoreFromHistory() or redraw background here.
     }
+    
+   
 
     // 记录最近一次被清空的时间戳，用于忽略清空前的延迟数据
     const lastClearTimestamp = ref(0)
@@ -1024,15 +1221,15 @@ export default {
 
     const emitShapePreview = (from, to) => {
       if (!props.socket || !mainCanvas.value) return
-      const w = mainCanvas.value.width
-      const h = mainCanvas.value.height
+      const logicalW = FIXED_CANVAS ? FIXED_CANVAS_WIDTH : mainCanvas.value.width
+      const logicalH = FIXED_CANVAS ? FIXED_CANVAS_HEIGHT : mainCanvas.value.height
       const payload = {
         lesson_id: props.lessonId,
         tool: currentTool.value,
         color: currentColor.value,
         size: brushSize.value,
-        from_percent: { x: from.x / w, y: from.y / h },
-        to_percent: { x: to.x / w, y: to.y / h }
+        from_percent: { x: from.x / logicalW, y: from.y / logicalH },
+        to_percent: { x: to.x / logicalW, y: to.y / logicalH }
       }
       // throttle
       if (shapePreviewThrottleTimer.timer) return
@@ -1042,15 +1239,15 @@ export default {
 
     const emitShapeComplete = (from, to) => {
       if (!props.socket || !mainCanvas.value) return
-      const w = mainCanvas.value.width
-      const h = mainCanvas.value.height
+      const logicalW = FIXED_CANVAS ? FIXED_CANVAS_WIDTH : mainCanvas.value.width
+      const logicalH = FIXED_CANVAS ? FIXED_CANVAS_HEIGHT : mainCanvas.value.height
       const payload = {
         lesson_id: props.lessonId,
         tool: currentTool.value,
         color: currentColor.value,
         size: brushSize.value,
-        from_percent: { x: from.x / w, y: from.y / h },
-        to_percent: { x: to.x / w, y: to.y / h }
+        from_percent: { x: from.x / logicalW, y: from.y / logicalH },
+        to_percent: { x: to.x / logicalW, y: to.y / logicalH }
       }
       props.socket.emit('classroom:shape_complete', payload)
     }
@@ -1277,7 +1474,12 @@ export default {
           // 兼容旧的 clear 事件
           const clearedAt = Date.now()
           lastClearTimestamp.value = clearedAt
-          ctx.clearRect(0, 0, mainCanvas.value.width, mainCanvas.value.height)
+          if (ctx && mainCanvas.value) {
+            const dpr = window.devicePixelRatio || 1
+            ctx.setTransform(1, 0, 0, 1, 0, 0)
+            ctx.clearRect(0, 0, mainCanvas.value.width, mainCanvas.value.height)
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+          }
           clearTempCanvas()
           strokeBuffer.value = []
           if (strokeFlushTimer) { clearTimeout(strokeFlushTimer); strokeFlushTimer = null }
@@ -1350,6 +1552,24 @@ export default {
       }, 200)
       window.addEventListener('keydown', handleKeyDown)
 
+      // 监听白板容器变化，防止因聊天面板折叠等外部布局变化拉伸画布
+      setTimeout(() => {
+        applyFixedDisplaySize()
+        try {
+          const vp = mainCanvas.value?.closest('.whiteboard-viewport') || mainCanvas.value?.parentElement
+          if (vp && 'ResizeObserver' in window) {
+            resizeObserver = new ResizeObserver(() => {
+              // 当容器尺寸变化时，重新应用固定显示尺寸（避免父容器以百分比或 transform 缩放 canvas）
+              applyFixedDisplaySize()
+            })
+            resizeObserver.observe(vp)
+          }
+        } catch (err) {
+          // 忽略 ResizeObserver 创建失败的环境
+          if (DEBUG) console.warn('[WhiteBoard] ResizeObserver init failed', err)
+        }
+      }, 50)
+
       // 监听Socket事件
       if (props.socket) {
         props.socket.on('classroom:board_draw', receiveDrawing)
@@ -1364,7 +1584,12 @@ export default {
         props.socket.on('classroom:board_clear', (payload) => {
           lastClearTimestamp.value = payload?.cleared_at || Date.now()
           // 清空主画布和临时画布、重置状态
-          if (ctx && mainCanvas.value) ctx.clearRect(0, 0, mainCanvas.value.width, mainCanvas.value.height)
+          if (ctx && mainCanvas.value) {
+            const dpr = window.devicePixelRatio || 1
+            ctx.setTransform(1, 0, 0, 1, 0, 0)
+            ctx.clearRect(0, 0, mainCanvas.value.width, mainCanvas.value.height)
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+          }
           clearTempCanvas()
           strokeBuffer.value = []
           if (strokeFlushTimer) { clearTimeout(strokeFlushTimer); strokeFlushTimer = null }
@@ -1422,8 +1647,22 @@ export default {
     })
 
     onBeforeUnmount(() => {
-      window.removeEventListener('resize', resizeCanvas)
+    
       window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('mousemove', onWindowMouseMove)
+      window.removeEventListener('mouseup', onWindowMouseUp)
+      window.removeEventListener('touchmove', onWindowTouchMove)
+      window.removeEventListener('touchend', onWindowTouchEnd)
+
+      // 清理 ResizeObserver
+      try {
+        if (resizeObserver) {
+          resizeObserver.disconnect()
+          resizeObserver = null
+        }
+      } catch (err) {
+        if (DEBUG) console.warn('[WhiteBoard] ResizeObserver cleanup failed', err)
+      }
 
       if (props.socket) {
         props.socket.off('classroom:board_draw')
@@ -1517,6 +1756,7 @@ export default {
       canRedo,
       textInputStyle,
       canvasTransformStyle, // 新增：画布变换样式
+      canvasWrapperStyle, // 新增：canvas-wrapper 的样式（translate/scale/固定显示尺寸）
       colorPalette,
       
       // Methods
@@ -1756,7 +1996,7 @@ export default {
 .canvas-area {
   flex: 1;
   position: relative;
-  background: #f9f7f7; /* 深灰色背景，表示画布外区域 */
+  background: #828282; /* 深灰色背景，表示画布外区域 */
   overflow: hidden;
   min-height: 300px;
 }
@@ -1771,7 +2011,7 @@ export default {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: #5d5c5c; /* 画布区域为白色 */
+  background: #724d4d; /* 画布区域为白色 */
   z-index: 5; /* 视口层级 */
 }
 
@@ -1808,6 +2048,9 @@ export default {
 .main-canvas {
   z-index: 1; /* 相对于canvas-container */
   cursor: crosshair;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .temp-canvas {
